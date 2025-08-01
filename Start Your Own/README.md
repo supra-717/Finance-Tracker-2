@@ -33,7 +33,10 @@ This script draws a graph of your portfolio versus the S&P 500.
    cd "Start Your Own"
    python Generate_Graph.py --baseline-equity 100
    ```
-   - Optional flags `--start-date` and `--end-date` accept dates in `YYYY-MM-DD` format.
+   - Optional flags `--start-date` and `--end-date` accept dates in `YYYY-MM-DD` format. For example:
+   ```bash
+   python Generate_Graph.py --baseline-equity 100 --start-date 2023-01-01 --end-date 2023-12-31
+   ```
 3. **View the chart**
    - A window opens showing your portfolio value and a $100 investment in the S&P 500.
 
