@@ -151,8 +151,11 @@ def process_portfolio(portfolio: pd.DataFrame, starting_cash: float) -> tuple[pd
     df = pd.DataFrame(results)
     if os.path.exists(PORTFOLIO_CSV):
         existing = pd.read_csv(PORTFOLIO_CSV)
-        existing = existing[existing["Date"] != today]
-        print("rows for today already logged, not saving results to CSV...")
+        if today in existing["Date"].values:
+            print(
+                "Rows for today already logged. Replacing existing entries before saving."
+            )
+            existing = existing[existing["Date"] != today]
         df = pd.concat([existing, df], ignore_index=True)
 
     df.to_csv(PORTFOLIO_CSV, index=False)
