@@ -319,10 +319,14 @@ def log_manual_sell(
     return cash, chatgpt_portfolio
 
 
-def daily_results(chatgpt_portfolio: pd.DataFrame, cash: float) -> None:
+def daily_results(chatgpt_portfolio: pd.DataFrame | list[dict[str, object]], cash: float) -> None:
     """Print daily price updates and performance metrics."""
     if isinstance(chatgpt_portfolio, pd.DataFrame):
         portfolio_dict = chatgpt_portfolio.to_dict(orient="records")
+    elif isinstance(chatgpt_portfolio, list):
+        portfolio_dict = chatgpt_portfolio
+    else:
+        raise TypeError("chatgpt_portfolio must be a DataFrame or list of records")
     print(f"prices and updates for {today}")
     for stock in portfolio_dict + [{"ticker": "^RUT"}] + [{"ticker": "IWO"}] + [{"ticker": "XBI"}]:
         ticker = stock["ticker"]
@@ -340,7 +344,7 @@ def daily_results(chatgpt_portfolio: pd.DataFrame, cash: float) -> None:
         except Exception as e:
             raise Exception(f"Download for {ticker} failed. {e} Try checking internet connection.")
         print(f"{ticker} closing price: {price:.2f}")
-        print(f"{ticker} volume for today: ${volume:,}")
+        print(f"{ticker} volume for today: {volume:,}")
         print(f"percent change from the day before: {percent_change:.2f}%")
     chatgpt_df = pd.read_csv(PORTFOLIO_CSV)
 
@@ -371,7 +375,10 @@ def daily_results(chatgpt_portfolio: pd.DataFrame, cash: float) -> None:
     # Sharpe Ratio
     sharpe_total = (total_return - rf_period) / (std_daily * np.sqrt(n_days))
     # Sortino Ratio
-    sortino_total = (total_return - rf_period) / (negative_std * np.sqrt(n_days))
+    if negative_std == 0 or np.isnan(negative_std):
+        sortino_total = 0.0
+    else:
+        sortino_total = (total_return - rf_period) / (negative_std * np.sqrt(n_days))
 
     # Output
     print(f"Total Sharpe Ratio over {n_days} days: {sharpe_total:.4f}")
