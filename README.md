@@ -77,5 +77,19 @@ Updates are posted weekly on my blog — more coming soon!
 
 One final shameless plug: (https://substack.com/@nathanbsmith?utm_source=edit-profile-page)
 
+## Run with Docker
+
+Build the image:
+
+```bash
+docker build -t micro-cap .
+```
+
+Execute the trading script:
+
+```bash
+docker run --rm -it micro-cap
+```
+
 Find a mistake in the logs or have advice?
 Please Reach out here: nathanbsmith.business@gmail.com
