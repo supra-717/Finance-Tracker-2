@@ -122,10 +122,10 @@ Would you like to log a manual trade? Enter 'b' for buy, 's' for sell, or press 
         break
 
     for _, stock in portfolio_df.iterrows():
-        ticker = stock["ticker"]
+        ticker = stock["Ticker"]
         shares = int(stock["shares"])
         cost = stock["buy_price"]
-        stop = stock["stop_loss"]
+        stop = stock["Stop Loss"]
         data = yf.Ticker(ticker).history(period="1d")
 
         if data.empty:
@@ -225,7 +225,7 @@ def log_sell(
         "Reason": "AUTOMATED SELL - STOPLOSS TRIGGERED",
     }
 
-    portfolio = portfolio[portfolio["ticker"] != ticker]
+    portfolio = portfolio[portfolio["Ticker"] != ticker]
 
     if TRADE_LOG_CSV.exists():
         df = pd.read_csv(TRADE_LOG_CSV)
@@ -290,13 +290,13 @@ def log_manual_buy(
     df.to_csv(TRADE_LOG_CSV, index=False)
     # if the portfolio doesn't already contain ticker, create a new row.
     
-    mask = chatgpt_portfolio["ticker"] == ticker
+    mask = chatgpt_portfolio["Ticker"] == ticker
 
     if not mask.any():
         new_trade = {
-            "ticker": ticker,
+            "Ticker": ticker,
             "shares": shares,
-            "stop_loss": stoploss,
+            "Stop Loss": stoploss,
             "buy_price": buy_price,
             "cost_basis": buy_price * shares,
         }
@@ -331,10 +331,10 @@ If this is a mistake, enter 1. """
     if reason == "1":
         print("Returning...")
         return cash, chatgpt_portfolio
-    if ticker not in chatgpt_portfolio["ticker"].values:
+    if ticker not in chatgpt_portfolio["Ticker"].values:
         print(f"Manual sell for {ticker} failed: ticker not in portfolio.")
         return cash, chatgpt_portfolio
-    ticker_row = chatgpt_portfolio[chatgpt_portfolio["ticker"] == ticker]
+    ticker_row = chatgpt_portfolio[chatgpt_portfolio["Ticker"] == ticker]
 
     total_shares = int(ticker_row["shares"].item())
     if shares_sold > total_shares:
@@ -395,9 +395,8 @@ def daily_results(chatgpt_portfolio: pd.DataFrame, cash: float) -> None:
     portfolio_dict: list[dict[str, object]] = chatgpt_portfolio.to_dict(orient="records")
 
     print(f"prices and updates for {today}")
-    time.sleep(1)
-    for stock in portfolio_dict + [{"ticker": "^RUT"}] + [{"ticker": "IWO"}] + [{"ticker": "XBI"}]:
-        ticker = stock["ticker"]
+    for stock in portfolio_dict + [{"Ticker": "^RUT"}] + [{"Ticker": "IWO"}] + [{"Ticker": "XBI"}]:
+        ticker = stock["Ticker"]
         try:
             data = yf.download(ticker, period="2d", progress=False)
             data = cast(pd.DataFrame, data)
@@ -505,7 +504,14 @@ def load_latest_portfolio_state(
 
     df = pd.read_csv(file)
     if df.empty:
-        portfolio = pd.DataFrame([])
+        # Initialize empty DataFrame with required columns
+        portfolio = pd.DataFrame(columns=[
+            'Ticker',
+            'shares',
+            'buy_price',
+            'Stop Loss',
+            'cost_basis'
+        ])
         print(
             "Portfolio CSV is empty. Returning set amount of cash for creating portfolio."
         )
@@ -516,6 +522,7 @@ def load_latest_portfolio_state(
                 "Cash could not be converted to float datatype. Please enter a valid number."
             )
         return portfolio, cash
+    
     non_total = df[df["Ticker"] != "TOTAL"].copy()
     non_total["Date"] = pd.to_datetime(non_total["Date"])
 
@@ -524,7 +531,7 @@ def load_latest_portfolio_state(
     # Get all tickers from the latest date
     latest_tickers = non_total[non_total["Date"] == latest_date].copy()
     latest_tickers.drop(columns=["Date", "Cash Balance", "Total Equity", "Action", "Current Price", "PnL", "Total Value"], inplace=True)
-    latest_tickers.rename(columns={"Cost Basis": "buy_price", "Shares": "shares", "Ticker": "ticker", "Stop Loss": "stop_loss"}, inplace=True)
+    latest_tickers.rename(columns={"Cost Basis": "buy_price", "Shares": "shares", "Ticker": "Ticker", "Stop Loss": "Stop Loss"}, inplace=True)
     latest_tickers['cost_basis'] = latest_tickers['shares'] * latest_tickers['buy_price']
     latest_tickers = latest_tickers.reset_index(drop=True).to_dict(orient='records')
     df = df[df["Ticker"] == "TOTAL"]  # Only the total summary rows
