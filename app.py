@@ -1,29 +1,41 @@
-import pandas as pd
-import streamlit as st
-import yfinance as yf
+"""Streamlit app for managing the ChatGPT micro-cap portfolio.
+
+The original implementation grew organically and contained a mix of UI and
+backend logic, duplicated blocks, and sparse documentation.  This refactor
+tidies the structure, centralises repeated behaviours, and adds explicit
+docstrings and inline comments to make the application easier for developers
+to understand and extend.
+"""
+
 from datetime import datetime
 from pathlib import Path
 
-# -----------------------------------------------------------------------------
+import pandas as pd
+import streamlit as st
+import yfinance as yf
+
+# ---------------------------------------------------------------------------
 # File locations
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 DATA_DIR = Path(__file__).resolve().parent / "Scripts and CSV Files"
 PORTFOLIO_CSV = DATA_DIR / "chatgpt_portfolio_update.csv"
 TRADE_LOG_CSV = DATA_DIR / "chatgpt_trade_log.csv"
 
-# Today's date used for all new logs
+# Today's date used for all new logs.
 TODAY = datetime.today().strftime("%Y-%m-%d")
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Helper functions
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
-    """Return latest portfolio, cash balance and whether initialization is needed.
+    """Return the latest portfolio and cash balance.
 
-    The boolean flag indicates if the CSV is missing, empty, or lacks a cash
-    balance (i.e. first-time use) so the UI can prompt for a starting amount.
+    The boolean flag indicates whether initialisation is required (e.g. the CSV
+    is missing or lacks a cash balance) so the UI can prompt the user for a
+    starting amount.
     """
+
     empty_portfolio = pd.DataFrame(
         columns=["ticker", "shares", "stop_loss", "buy_price", "cost_basis"]
     )
@@ -47,11 +59,18 @@ def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
         latest_date = non_total["Date"].max()
         latest = non_total[non_total["Date"] == latest_date].copy()
         latest.rename(
-            columns={"Ticker": "ticker", "Shares": "shares", "Stop Loss": "stop_loss", "Cost Basis": "buy_price"},
+            columns={
+                "Ticker": "ticker",
+                "Shares": "shares",
+                "Stop Loss": "stop_loss",
+                "Cost Basis": "buy_price",
+            },
             inplace=True,
         )
         latest["cost_basis"] = latest["shares"] * latest["buy_price"]
-        portfolio = latest[["ticker", "shares", "stop_loss", "buy_price", "cost_basis"]].reset_index(drop=True)
+        portfolio = latest[
+            ["ticker", "shares", "stop_loss", "buy_price", "cost_basis"]
+        ].reset_index(drop=True)
 
     total_rows = df[df["Ticker"] == "TOTAL"].copy()
     if total_rows.empty:
@@ -63,23 +82,26 @@ def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
 
     return portfolio, cash, False
 
-def save_portfolio_snapshot(portfolio: pd.DataFrame, cash: float) -> pd.DataFrame:
-    """Recalculate today's portfolio values and store them in ``PORTFOLIO_CSV``."""
-    results = []
+def save_portfolio_snapshot(portfolio_df: pd.DataFrame, cash: float) -> pd.DataFrame:
+    """Recalculate today's portfolio values and persist them to ``PORTFOLIO_CSV``."""
+
+    results: list[dict[str, float | str]] = []
     total_value = 0.0
     total_pnl = 0.0
 
-    for _, row in portfolio.iterrows():
+    for _, row in portfolio_df.iterrows():
         ticker = row["ticker"]
         shares = float(row["shares"])
         stop = float(row["stop_loss"])
         cost = float(row["buy_price"])
+
         data = yf.download(ticker, period="1d", progress=False)
         price = float(data["Close"].iloc[-1]) if not data.empty else 0.0
         value = round(price * shares, 2)
         pnl = round((price - cost) * shares, 2)
         total_value += value
         total_pnl += pnl
+
         results.append(
             {
                 "Date": TODAY,
@@ -119,29 +141,56 @@ def save_portfolio_snapshot(portfolio: pd.DataFrame, cash: float) -> pd.DataFram
     df.to_csv(PORTFOLIO_CSV, index=False)
     return df
 
+
+def get_day_high_low(ticker: str) -> tuple[float, float]:
+    """Return today's high and low price for ``ticker``.
+
+    Raises ``RuntimeError`` if the ticker data cannot be downloaded and
+    ``ValueError`` if no market data is returned.
+    """
+
+    try:
+        data = yf.download(ticker, period="1d", progress=False)
+    except Exception as exc:  # pragma: no cover - network errors
+        raise RuntimeError(f"Data download failed: {exc}") from exc
+    if data.empty:
+        raise ValueError("No market data available.")
+    return float(data["High"].iloc[-1]), float(data["Low"].iloc[-1])
+
+
+def append_trade_log(log: dict) -> None:
+    """Append a dictionary entry to the trade log CSV."""
+
+    if TRADE_LOG_CSV.exists():
+        existing = pd.read_csv(TRADE_LOG_CSV)
+        log_df = pd.concat([existing, pd.DataFrame([log])], ignore_index=True)
+    else:
+        log_df = pd.DataFrame([log])
+    log_df.to_csv(TRADE_LOG_CSV, index=False)
+
 def manual_buy(
     ticker: str,
     shares: float,
     price: float,
     stop_loss: float,
-    portfolio: pd.DataFrame,
+    portfolio_df: pd.DataFrame,
     cash: float,
 ) -> tuple[bool, str, pd.DataFrame, float]:
     """Execute a manual buy and update portfolio and logs."""
+
     ticker = ticker.upper()
     try:
-        data = yf.download(ticker, period="1d", progress=False)
+        day_high, day_low = get_day_high_low(ticker)
     except Exception as exc:  # pragma: no cover - network errors
-        return False, f"Data download failed: {exc}", portfolio, cash
-    if data.empty:
-        return False, "No market data available.", portfolio, cash
-    day_high = float(data["High"].iloc[-1])
-    day_low = float(data["Low"].iloc[-1])
+        return False, str(exc), portfolio_df, cash
+
     if not (day_low <= price <= day_high):
-        return False, f"Price outside today's range {day_low:.2f}-{day_high:.2f}", portfolio, cash
+        msg = f"Price outside today's range {day_low:.2f}-{day_high:.2f}"
+        return False, msg, portfolio_df, cash
+
     cost = price * shares
     if cost > cash:
-        return False, "Insufficient cash for this trade.", portfolio, cash
+        return False, "Insufficient cash for this trade.", portfolio_df, cash
 
     log = {
         "Date": TODAY,
@@ -152,14 +201,9 @@ def manual_buy(
         "PnL": 0.0,
         "Reason": "MANUAL BUY - New position",
     }
-    if TRADE_LOG_CSV.exists():
-        df = pd.read_csv(TRADE_LOG_CSV)
-        df = pd.concat([df, pd.DataFrame([log])], ignore_index=True)
-    else:
-        df = pd.DataFrame([log])
-    df.to_csv(TRADE_LOG_CSV, index=False)
+    append_trade_log(log)
 
-    mask = portfolio["ticker"] == ticker
+    mask = portfolio_df["ticker"] == ticker
     if not mask.any():
         new_row = {
             "ticker": ticker,
@@ -168,46 +212,53 @@ def manual_buy(
             "buy_price": price,
             "cost_basis": cost,
         }
-        portfolio = pd.concat([portfolio, pd.DataFrame([new_row])], ignore_index=True)
+        portfolio_df = pd.concat(
+            [portfolio_df, pd.DataFrame([new_row])], ignore_index=True
+        )
     else:
-        idx = portfolio[mask].index[0]
-        current_shares = float(portfolio.at[idx, "shares"])
-        current_cost_basis = float(portfolio.at[idx, "cost_basis"])
-        portfolio.at[idx, "shares"] = current_shares + shares
-        portfolio.at[idx, "cost_basis"] = current_cost_basis + cost
-        portfolio.at[idx, "buy_price"] = portfolio.at[idx, "cost_basis"] / portfolio.at[idx, "shares"]
-        portfolio.at[idx, "stop_loss"] = stop_loss
+        idx = portfolio_df[mask].index[0]
+        current_shares = float(portfolio_df.at[idx, "shares"])
+        current_cost = float(portfolio_df.at[idx, "cost_basis"])
+        portfolio_df.at[idx, "shares"] = current_shares + shares
+        portfolio_df.at[idx, "cost_basis"] = current_cost + cost
+        portfolio_df.at[idx, "buy_price"] = (
+            portfolio_df.at[idx, "cost_basis"] / portfolio_df.at[idx, "shares"]
+        )
+        portfolio_df.at[idx, "stop_loss"] = stop_loss
 
     cash -= cost
-    save_portfolio_snapshot(portfolio, cash)
-    return True, f"Bought {shares} shares of {ticker} at ${price:.2f}.", portfolio, cash
+    save_portfolio_snapshot(portfolio_df, cash)
+    msg = f"Bought {shares} shares of {ticker} at ${price:.2f}."
+    return True, msg, portfolio_df, cash
 
 def manual_sell(
     ticker: str,
     shares: float,
     price: float,
-    portfolio: pd.DataFrame,
+    portfolio_df: pd.DataFrame,
     cash: float,
 ) -> tuple[bool, str, pd.DataFrame, float]:
     """Execute a manual sell and update portfolio and logs."""
-    ticker = ticker.upper()
-    if ticker not in portfolio["ticker"].values:
-        return False, "Ticker not in portfolio.", portfolio, cash
-    try:
-        data = yf.download(ticker, period="1d", progress=False)
-    except Exception as exc:  # pragma: no cover - network errors
-        return False, f"Data download failed: {exc}", portfolio, cash
-    if data.empty:
-        return False, "No market data available.", portfolio, cash
-    day_high = float(data["High"].iloc[-1])
-    day_low = float(data["Low"].iloc[-1])
-    if not (day_low <= price <= day_high):
-        return False, f"Price outside today's range {day_low:.2f}-{day_high:.2f}", portfolio, cash
 
-    row = portfolio[portfolio["ticker"] == ticker].iloc[0]
+    ticker = ticker.upper()
+    if ticker not in portfolio_df["ticker"].values:
+        return False, "Ticker not in portfolio.", portfolio_df, cash
+
+    try:
+        day_high, day_low = get_day_high_low(ticker)
+    except Exception as exc:  # pragma: no cover - network errors
+        return False, str(exc), portfolio_df, cash
+
+    if not (day_low <= price <= day_high):
+        msg = f"Price outside today's range {day_low:.2f}-{day_high:.2f}"
+        return False, msg, portfolio_df, cash
+
+    row = portfolio_df[portfolio_df["ticker"] == ticker].iloc[0]
     total_shares = float(row["shares"])
     if shares > total_shares:
-        return False, f"Trying to sell {shares} shares but only own {total_shares}.", portfolio, cash
+        msg = f"Trying to sell {shares} shares but only own {total_shares}."
+        return False, msg, portfolio_df, cash
+
     buy_price = float(row["buy_price"])
     cost_basis = buy_price * shares
     pnl = price * shares - cost_basis
@@ -223,85 +274,156 @@ def manual_sell(
         "Shares Sold": shares,
         "Sell Price": price,
     }
-    if TRADE_LOG_CSV.exists():
-        df = pd.read_csv(TRADE_LOG_CSV)
-        df = pd.concat([df, pd.DataFrame([log])], ignore_index=True)
-    else:
-        df = pd.DataFrame([log])
-    df.to_csv(TRADE_LOG_CSV, index=False)
+    append_trade_log(log)
 
     if shares == total_shares:
-        portfolio = portfolio[portfolio["ticker"] != ticker]
+        portfolio_df = portfolio_df[portfolio_df["ticker"] != ticker]
     else:
-        idx = portfolio[portfolio["ticker"] == ticker].index[0]
-        portfolio.at[idx, "shares"] = total_shares - shares
-        portfolio.at[idx, "cost_basis"] = portfolio.at[idx, "shares"] * buy_price
+        idx = portfolio_df[portfolio_df["ticker"] == ticker].index[0]
+        portfolio_df.at[idx, "shares"] = total_shares - shares
+        portfolio_df.at[idx, "cost_basis"] = portfolio_df.at[idx, "shares"] * buy_price
 
     cash += price * shares
-    save_portfolio_snapshot(portfolio, cash)
-    return True, f"Sold {shares} shares of {ticker} at ${price:.2f}.", portfolio, cash
+    save_portfolio_snapshot(portfolio_df, cash)
+    msg = f"Sold {shares} shares of {ticker} at ${price:.2f}."
+    return True, msg, portfolio_df, cash
 
-# -----------------------------------------------------------------------------
-# Streamlit UI
-# -----------------------------------------------------------------------------
+def init_session_state() -> None:
+    """Initialise default values in ``st.session_state`` on first run."""
 
-st.title("ChatGPT Portfolio Manager")
+    for key, default in {
+        "b_ticker": "",
+        "b_shares": 0.0,
+        "b_price": 0.0,
+        "b_stop": 0.0,
+        "s_ticker": "",
+        "s_shares": 0.0,
+        "s_price": 0.0,
+    }.items():
+        st.session_state.setdefault(key, default)
 
-# ------------------------------------------------------------------
-# One-time feedback messaging
-# ------------------------------------------------------------------
-# Any success or error messages from prior actions are stored in
-# ``st.session_state``. Display them once and then remove so that
-# messages do not linger between interactions.
-feedback = st.session_state.pop("feedback", None)
-if feedback:
-    kind, text = feedback
-    if kind == "success":
-        st.success(text)
-    else:
-        st.error(text)
+    if "portfolio" not in st.session_state:
+        port, cash, needs_cash = load_portfolio()
+        st.session_state.portfolio = port
+        st.session_state.cash = cash
+        st.session_state.needs_cash = needs_cash
 
-# ------------------------------------------------------------------
-# Initialize session state for form fields so they can be cleared
-# programmatically after a successful trade.
-# ------------------------------------------------------------------
-for key, default in {
-    "b_ticker": "",
-    "b_shares": 0.0,
-    "b_price": 0.0,
-    "b_stop": 0.0,
-    "s_ticker": "",
-    "s_shares": 0.0,
-    "s_price": 0.0,
-}.items():
-    st.session_state.setdefault(key, default)
 
-if "portfolio" not in st.session_state:
-    port, cash, needs_cash = load_portfolio()
-    st.session_state.portfolio = port
-    st.session_state.cash = cash
-    st.session_state.needs_cash = needs_cash
+def show_buy_form() -> None:
+    """Render and process the buy form."""
 
-if st.session_state.get("needs_cash", False):
-    # Prompt for starting cash on first-time use
-    st.subheader("Initialize Portfolio")
-    with st.form("init_cash_form"):
-        start_cash = st.number_input("Enter starting cash", min_value=0.0, format="%.2f")
-        init_submit = st.form_submit_button("Set Starting Cash")
-    if init_submit:
-        st.session_state.cash = start_cash
-        st.session_state.needs_cash = False
-        # Persist the cash value to CSV
-        save_portfolio_snapshot(st.session_state.portfolio, st.session_state.cash)
-        st.success(f"Starting cash of ${start_cash:.2f} recorded.")
+    st.subheader("Log a Buy")
+    with st.form("buy_form"):
+        b_ticker = st.text_input("Ticker", key="b_ticker")
+        b_shares = st.number_input(
+            "Shares", min_value=0.0, step=1.0, key="b_shares"
+        )
+        b_price = st.number_input(
+            "Price", min_value=0.0, format="%.2f", key="b_price"
+        )
+        b_stop = st.number_input(
+            "Stop-loss", min_value=0.0, format="%.2f", key="b_stop"
+        )
+        b_submit = st.form_submit_button("Submit Buy")
+
+    if b_submit:
+        ok, msg, port, cash = manual_buy(
+            b_ticker,
+            b_shares,
+            b_price,
+            b_stop,
+            st.session_state.portfolio,
+            st.session_state.cash,
+        )
+        if ok:
+            st.session_state.portfolio = port
+            st.session_state.cash = cash
+            st.session_state.feedback = ("success", msg)
+            # Clear form values
+            st.session_state.b_ticker = ""
+            st.session_state.b_shares = 0.0
+            st.session_state.b_price = 0.0
+            st.session_state.b_stop = 0.0
+        else:
+            st.session_state.feedback = ("error", msg)
         st.rerun()
-else:
-    # Always refresh today's snapshot and totals once cash is initialized
-    summary_df = save_portfolio_snapshot(st.session_state.portfolio, st.session_state.cash)
 
-    # ------------------------------------------------------------------
-    # Daily summary generation on demand
-    # ------------------------------------------------------------------
+
+def show_sell_form() -> None:
+    """Render and process the sell form."""
+
+    st.subheader("Log a Sell")
+    with st.form("sell_form"):
+        s_ticker = st.text_input("Ticker", key="s_ticker")
+        s_shares = st.number_input(
+            "Shares", min_value=0.0, step=1.0, key="s_shares"
+        )
+        s_price = st.number_input(
+            "Price", min_value=0.0, format="%.2f", key="s_price"
+        )
+        s_submit = st.form_submit_button("Submit Sell")
+
+    if s_submit:
+        ok, msg, port, cash = manual_sell(
+            s_ticker,
+            s_shares,
+            s_price,
+            st.session_state.portfolio,
+            st.session_state.cash,
+        )
+        if ok:
+            st.session_state.portfolio = port
+            st.session_state.cash = cash
+            st.session_state.feedback = ("success", msg)
+            # Clear form values
+            st.session_state.s_ticker = ""
+            st.session_state.s_shares = 0.0
+            st.session_state.s_price = 0.0
+        else:
+            st.session_state.feedback = ("error", msg)
+        st.rerun()
+
+
+def main() -> None:
+    """Entry point for the Streamlit UI."""
+
+    st.title("ChatGPT Portfolio Manager")
+
+    # Display feedback messages once and remove from session state so they
+    # do not linger between reruns.
+    feedback = st.session_state.pop("feedback", None)
+    if feedback:
+        kind, text = feedback
+        if kind == "success":
+            st.success(text)
+        else:
+            st.error(text)
+
+    init_session_state()
+
+    if st.session_state.get("needs_cash", False):
+        # Prompt for starting cash on first-time use
+        st.subheader("Initialize Portfolio")
+        with st.form("init_cash_form"):
+            start_cash = st.number_input(
+                "Enter starting cash", min_value=0.0, format="%.2f"
+            )
+            init_submit = st.form_submit_button("Set Starting Cash")
+        if init_submit:
+            st.session_state.cash = start_cash
+            st.session_state.needs_cash = False
+            save_portfolio_snapshot(
+                st.session_state.portfolio, st.session_state.cash
+            )
+            st.success(f"Starting cash of ${start_cash:.2f} recorded.")
+            st.rerun()
+        return
+
+    # Always refresh today's snapshot and totals once cash is initialised
+    summary_df = save_portfolio_snapshot(
+        st.session_state.portfolio, st.session_state.cash
+    )
+
     st.subheader("Daily Summary")
     if st.button("Generate Daily Summary"):
         if not summary_df.empty:
@@ -324,52 +446,9 @@ else:
         st.dataframe(st.session_state.portfolio)
     st.metric("Cash Balance", f"${st.session_state.cash:.2f}")
 
-    st.subheader("Log a Buy")
-    with st.form("buy_form"):
-        # Form fields use explicit keys so they can be reset after
-        # successful submissions.
-        b_ticker = st.text_input("Ticker", key="b_ticker")
-        b_shares = st.number_input("Shares", min_value=0.0, step=1.0, key="b_shares")
-        b_price = st.number_input("Price", min_value=0.0, format="%.2f", key="b_price")
-        b_stop = st.number_input("Stop-loss", min_value=0.0, format="%.2f", key="b_stop")
-        b_submit = st.form_submit_button("Submit Buy")
-    if b_submit:
-        ok, msg, port, cash = manual_buy(
-            b_ticker, b_shares, b_price, b_stop, st.session_state.portfolio, st.session_state.cash
-        )
-        if ok:
-            st.session_state.portfolio = port
-            st.session_state.cash = cash
-            # Store success message for next run and clear the form
-            st.session_state.feedback = ("success", msg)
-            st.session_state.b_ticker = ""
-            st.session_state.b_shares = 0.0
-            st.session_state.b_price = 0.0
-            st.session_state.b_stop = 0.0
-        else:
-            # Store error message without clearing inputs so the user
-            # can adjust values and resubmit.
-            st.session_state.feedback = ("error", msg)
-        st.rerun()
+    show_buy_form()
+    show_sell_form()
 
-    st.subheader("Log a Sell")
-    with st.form("sell_form"):
-        s_ticker = st.text_input("Ticker", key="s_ticker")
-        s_shares = st.number_input("Shares", min_value=0.0, step=1.0, key="s_shares")
-        s_price = st.number_input("Price", min_value=0.0, format="%.2f", key="s_price")
-        s_submit = st.form_submit_button("Submit Sell")
-    if s_submit:
-        ok, msg, port, cash = manual_sell(
-            s_ticker, s_shares, s_price, st.session_state.portfolio, st.session_state.cash
-        )
-        if ok:
-            st.session_state.portfolio = port
-            st.session_state.cash = cash
-            st.session_state.feedback = ("success", msg)
-            # Clear sell form inputs after successful trade
-            st.session_state.s_ticker = ""
-            st.session_state.s_shares = 0.0
-            st.session_state.s_price = 0.0
-        else:
-            st.session_state.feedback = ("error", msg)
-        st.rerun()
+
+if __name__ == "__main__":
+    main()
