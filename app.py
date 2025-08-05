@@ -247,6 +247,35 @@ def manual_sell(
 
 st.title("ChatGPT Portfolio Manager")
 
+# ------------------------------------------------------------------
+# One-time feedback messaging
+# ------------------------------------------------------------------
+# Any success or error messages from prior actions are stored in
+# ``st.session_state``. Display them once and then remove so that
+# messages do not linger between interactions.
+feedback = st.session_state.pop("feedback", None)
+if feedback:
+    kind, text = feedback
+    if kind == "success":
+        st.success(text)
+    else:
+        st.error(text)
+
+# ------------------------------------------------------------------
+# Initialize session state for form fields so they can be cleared
+# programmatically after a successful trade.
+# ------------------------------------------------------------------
+for key, default in {
+    "b_ticker": "",
+    "b_shares": 0.0,
+    "b_price": 0.0,
+    "b_stop": 0.0,
+    "s_ticker": "",
+    "s_shares": 0.0,
+    "s_price": 0.0,
+}.items():
+    st.session_state.setdefault(key, default)
+
 if "portfolio" not in st.session_state:
     port, cash, needs_cash = load_portfolio()
     st.session_state.portfolio = port
@@ -270,6 +299,24 @@ else:
     # Always refresh today's snapshot and totals once cash is initialized
     summary_df = save_portfolio_snapshot(st.session_state.portfolio, st.session_state.cash)
 
+    # ------------------------------------------------------------------
+    # Daily summary generation on demand
+    # ------------------------------------------------------------------
+    st.subheader("Daily Summary")
+    if st.button("Generate Daily Summary"):
+        if not summary_df.empty:
+            totals = summary_df[summary_df["Ticker"] == "TOTAL"].iloc[0]
+            summary_md = (
+                "### Today's totals:\n"
+                f"- Total stock value: ${totals['Total Value']}\n"
+                f"- Total PnL: ${totals['PnL']}\n"
+                f"- Cash balance: ${totals['Cash Balance']}\n"
+                f"- Total equity: ${totals['Total Equity']}\n"
+            )
+            st.markdown(summary_md)
+        else:
+            st.info("No summary available.")
+
     st.subheader("Current Portfolio")
     if st.session_state.portfolio.empty:
         st.info("Your portfolio is empty. Add your first trade below.")
@@ -279,10 +326,12 @@ else:
 
     st.subheader("Log a Buy")
     with st.form("buy_form"):
-        b_ticker = st.text_input("Ticker")
-        b_shares = st.number_input("Shares", min_value=0.0, step=1.0)
-        b_price = st.number_input("Price", min_value=0.0, format="%.2f")
-        b_stop = st.number_input("Stop-loss", min_value=0.0, format="%.2f")
+        # Form fields use explicit keys so they can be reset after
+        # successful submissions.
+        b_ticker = st.text_input("Ticker", key="b_ticker")
+        b_shares = st.number_input("Shares", min_value=0.0, step=1.0, key="b_shares")
+        b_price = st.number_input("Price", min_value=0.0, format="%.2f", key="b_price")
+        b_stop = st.number_input("Stop-loss", min_value=0.0, format="%.2f", key="b_stop")
         b_submit = st.form_submit_button("Submit Buy")
     if b_submit:
         ok, msg, port, cash = manual_buy(
@@ -291,16 +340,23 @@ else:
         if ok:
             st.session_state.portfolio = port
             st.session_state.cash = cash
-            st.success(msg)
-            st.rerun()
+            # Store success message for next run and clear the form
+            st.session_state.feedback = ("success", msg)
+            st.session_state.b_ticker = ""
+            st.session_state.b_shares = 0.0
+            st.session_state.b_price = 0.0
+            st.session_state.b_stop = 0.0
         else:
-            st.error(msg)
+            # Store error message without clearing inputs so the user
+            # can adjust values and resubmit.
+            st.session_state.feedback = ("error", msg)
+        st.rerun()
 
     st.subheader("Log a Sell")
     with st.form("sell_form"):
-        s_ticker = st.text_input("Ticker", key="sell_ticker")
-        s_shares = st.number_input("Shares", min_value=0.0, step=1.0, key="sell_shares")
-        s_price = st.number_input("Price", min_value=0.0, format="%.2f", key="sell_price")
+        s_ticker = st.text_input("Ticker", key="s_ticker")
+        s_shares = st.number_input("Shares", min_value=0.0, step=1.0, key="s_shares")
+        s_price = st.number_input("Price", min_value=0.0, format="%.2f", key="s_price")
         s_submit = st.form_submit_button("Submit Sell")
     if s_submit:
         ok, msg, port, cash = manual_sell(
@@ -309,21 +365,11 @@ else:
         if ok:
             st.session_state.portfolio = port
             st.session_state.cash = cash
-            st.success(msg)
-            st.rerun()
+            st.session_state.feedback = ("success", msg)
+            # Clear sell form inputs after successful trade
+            st.session_state.s_ticker = ""
+            st.session_state.s_shares = 0.0
+            st.session_state.s_price = 0.0
         else:
-            st.error(msg)
-
-    st.subheader("Daily Summary")
-    if not summary_df.empty:
-        totals = summary_df[summary_df["Ticker"] == "TOTAL"].iloc[0]
-        summary_md = (
-            "### Today's totals:\n"
-            f"- Total stock value: ${totals['Total Value']}\n"
-            f"- Total PnL: ${totals['PnL']}\n"
-            f"- Cash balance: ${totals['Cash Balance']}\n"
-            f"- Total equity: ${totals['Total Equity']}\n"
-        )
-        st.markdown(summary_md)
-    else:
-        st.info("No summary available.")
+            st.session_state.feedback = ("error", msg)
+        st.rerun()
