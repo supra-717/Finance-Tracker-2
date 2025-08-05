@@ -300,6 +300,7 @@ def init_session_state() -> None:
         "s_shares": 0.0,
         "s_price": 0.0,
         "ac_amount": 0.0,
+        "watchlist": [],
     }.items():
         st.session_state.setdefault(key, default)
 
@@ -308,6 +309,64 @@ def init_session_state() -> None:
         st.session_state.portfolio = port
         st.session_state.cash = cash
         st.session_state.needs_cash = needs_cash
+
+
+def show_watchlist_sidebar() -> None:
+    """Render ticker lookup and watchlist in the sidebar."""
+
+    sidebar = st.sidebar
+    sidebar.header("Ticker Lookup")
+
+    # Remove any watched tickers that are now held in the portfolio.
+    portfolio_tickers = (
+        set(st.session_state.portfolio["ticker"].values)
+        if not st.session_state.portfolio.empty
+        else set()
+    )
+    removed = [t for t in st.session_state.watchlist if t in portfolio_tickers]
+    if removed:
+        st.session_state.watchlist = [t for t in st.session_state.watchlist if t not in removed]
+        st.session_state.feedback = (
+            "info",
+            f"Removed {', '.join(removed)} from watchlist (now in portfolio).",
+        )
+
+    # Lookup form for a single ticker symbol.
+    symbol = sidebar.text_input("Symbol", key="lookup_symbol", placeholder="e.g. AAPL")
+    if symbol:
+        sym = symbol.upper()
+        try:
+            ticker_obj = yf.Ticker(sym)
+            hist = ticker_obj.history(period="1d")
+            if hist.empty:
+                raise ValueError
+            price = float(hist["Close"].iloc[-1])
+            name = ticker_obj.info.get("shortName") or ticker_obj.info.get("longName") or sym
+            sidebar.write(f"{name}: ${price:.2f}")
+            if sidebar.button("Add to Watchlist", key="add_watchlist"):
+                if sym in st.session_state.watchlist:
+                    st.session_state.feedback = ("info", f"{sym} already in watchlist.")
+                elif sym in portfolio_tickers:
+                    st.session_state.feedback = ("info", f"{sym} already in portfolio.")
+                else:
+                    st.session_state.watchlist.append(sym)
+                    st.session_state.feedback = ("success", f"{sym} added to watchlist.")
+        except Exception:
+            sidebar.error("Ticker not found.")
+
+    # Display the watchlist with latest prices on every run.
+    if st.session_state.watchlist:
+        sidebar.subheader("Watchlist")
+        for t in st.session_state.watchlist:
+            try:
+                data = yf.download(t, period="1d", progress=False)
+                price = float(data["Close"].iloc[-1]) if not data.empty else None
+            except Exception:
+                price = None
+            if price is not None:
+                sidebar.write(f"{t}: ${price:.2f}")
+            else:
+                sidebar.write(f"{t}: N/A")
 
 
 def show_buy_form() -> None:
@@ -327,6 +386,11 @@ def show_buy_form() -> None:
         if ok:
             st.session_state.portfolio = port
             st.session_state.cash = cash
+            ticker = st.session_state.b_ticker.upper()
+            # Remove from watchlist if the ticker was previously being watched.
+            if ticker in st.session_state.watchlist:
+                st.session_state.watchlist.remove(ticker)
+                msg += f" {ticker} removed from watchlist."
             st.session_state.feedback = ("success", msg)
         else:
             st.session_state.feedback = ("error", msg)
@@ -374,8 +438,6 @@ def show_sell_form() -> None:
 def show_add_cash_form() -> None:
     """Render a form that lets the user add cash to the account."""
 
-    st.subheader("Add Cash")
-
     def submit_cash() -> None:
         """Update cash balance and persist the change."""
 
@@ -394,20 +456,24 @@ def show_add_cash_form() -> None:
             f"Added ${amount:.2f} to cash balance.",
         )
 
-    with st.form("add_cash_form", clear_on_submit=True):
-        st.number_input(
-            "Amount",
-            min_value=0.0,
-            format="%.2f",
-            key="ac_amount",
-        )
-        st.form_submit_button("Add Cash", on_click=submit_cash)
+    # Display inside an expander so the UI mirrors the buy/sell forms.
+    with st.expander("Add Cash"):
+        with st.form("add_cash_form", clear_on_submit=True):
+            st.number_input(
+                "Amount",
+                min_value=0.0,
+                format="%.2f",
+                key="ac_amount",
+            )
+            st.form_submit_button("Add Cash", on_click=submit_cash)
 
 
 def main() -> None:
     """Entry point for the Streamlit UI."""
 
     st.title("ChatGPT Portfolio Manager")
+    init_session_state()
+    show_watchlist_sidebar()
 
     # Display feedback messages once and remove from session state so they
     # do not linger between reruns.
@@ -416,13 +482,13 @@ def main() -> None:
         kind, text = feedback
         if kind == "success":
             st.success(text)
-        else:
+        elif kind == "error":
             st.error(text)
-
-    init_session_state()
+        else:
+            st.info(text)
 
     if st.session_state.get("needs_cash", False):
-        # Prompt for starting cash on first-time use
+        # Prompt for starting cash on first-time use.
         st.subheader("Initialize Portfolio")
         with st.form("init_cash_form", clear_on_submit=True):
             start_cash_raw = st.text_input(
@@ -459,6 +525,44 @@ def main() -> None:
         st.session_state.portfolio, st.session_state.cash
     )
 
+    # ------------------------------------------------------------------
+    # Section 1: Cash Balance & Add Cash
+    # ------------------------------------------------------------------
+    st.subheader("Cash Balance")
+    st.metric("Cash", f"${st.session_state.cash:.2f}")
+    show_add_cash_form()
+
+    # ------------------------------------------------------------------
+    # Section 2: Current Portfolio Table
+    # ------------------------------------------------------------------
+    st.subheader("Current Portfolio")
+    port_table = summary_df[summary_df["Ticker"] != "TOTAL"].copy()
+    if port_table.empty:
+        st.info("Your portfolio is empty. Log a trade below.")
+    else:
+        port_table["Pct Change"] = (
+            (port_table["Current Price"] - port_table["Cost Basis"]) / port_table["Cost Basis"]
+        ) * 100
+        port_table["Pct Change"] = port_table["Pct Change"].round(2)
+
+        def highlight_pct(val: float) -> str:
+            """Colour cells when price moved more than ±5%."""
+
+            if val > 5:
+                return "background-color: #d4ffd4"  # light green
+            if val < -5:
+                return "background-color: #ffd4d4"  # light red
+            return ""
+
+        st.dataframe(port_table.style.applymap(highlight_pct, subset=["Pct Change"]))
+        st.caption(f"Last updated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    show_buy_form()
+    show_sell_form()
+
+    # ------------------------------------------------------------------
+    # Section 3: Daily Summary
+    # ------------------------------------------------------------------
     st.subheader("Daily Summary")
     if st.button("Generate Daily Summary"):
         if not summary_df.empty:
@@ -473,17 +577,6 @@ def main() -> None:
             st.markdown(summary_md)
         else:
             st.info("No summary available.")
-
-    st.subheader("Current Portfolio")
-    if st.session_state.portfolio.empty:
-        st.info("Your portfolio is empty. Add your first trade below.")
-    else:
-        st.dataframe(st.session_state.portfolio)
-    st.metric("Cash Balance", f"${st.session_state.cash:.2f}")
-
-    show_add_cash_form()
-    show_buy_form()
-    show_sell_form()
 
 
 if __name__ == "__main__":
