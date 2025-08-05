@@ -510,7 +510,7 @@ def main(file: str, data_dir: Path | None = None) -> None:
 
 def load_latest_portfolio_state(
     file: str,
-) -> tuple[pd.DataFrame | list[dict[str, Any]], float]:
+) -> tuple[pd.DataFrame, float]:
     """Load the most recent portfolio snapshot and cash balance.
 
     Parameters
@@ -520,38 +520,48 @@ def load_latest_portfolio_state(
 
     Returns
     -------
-    tuple[pd.DataFrame | list[dict[str, Any]], float]
-        A representation of the latest holdings (either an empty DataFrame or a
-        list of row dictionaries) and the associated cash balance.
+    tuple[pd.DataFrame, float]
+        A DataFrame of holdings and the current cash balance.
     """
-
     df = pd.read_csv(file)
+    
+    # If no data exists, return initialized empty portfolio and prompt for cash
     if df.empty:
-        portfolio = pd.DataFrame([])
-        print(
-            "Portfolio CSV is empty. Returning set amount of cash for creating portfolio."
-        )
+        print("Portfolio CSV is empty. Returning set amount of cash for creating portfolio.")
         try:
             cash = float(input("What would you like your starting cash amount to be? "))
         except ValueError:
-            raise ValueError(
-                "Cash could not be converted to float datatype. Please enter a valid number."
-            )
+            raise ValueError("Cash could not be converted to float datatype. Please enter a valid number.")
+        
+        # Define an empty portfolio with correct columns
+        portfolio = pd.DataFrame(columns=["ticker", "shares", "stop_loss", "buy_price", "cost_basis"])
         return portfolio, cash
+
+    # Separate out all rows that are not TOTAL summary rows
     non_total = df[df["Ticker"] != "TOTAL"].copy()
     non_total["Date"] = pd.to_datetime(non_total["Date"])
 
-    latest_date = non_total["Date"].max()
+    if non_total.empty:
+        portfolio = pd.DataFrame(columns=["ticker", "shares", "stop_loss", "buy_price", "cost_basis"])
+    else:
+        latest_date = non_total["Date"].max()
+        latest_tickers = non_total[non_total["Date"] == latest_date].copy()
 
-    # Get all tickers from the latest date
-    latest_tickers = non_total[non_total["Date"] == latest_date].copy()
-    latest_tickers.drop(columns=["Date", "Cash Balance", "Total Equity", "Action", "Current Price", "PnL", "Total Value"], inplace=True)
-    latest_tickers.rename(columns={"Cost Basis": "buy_price", "Shares": "shares", "Ticker": "ticker", "Stop Loss": "stop_loss"}, inplace=True)
-    latest_tickers['cost_basis'] = latest_tickers['shares'] * latest_tickers['buy_price']
-    latest_tickers = latest_tickers.reset_index(drop=True).to_dict(orient='records')
-    df = df[df["Ticker"] == "TOTAL"]  # Only the total summary rows
+        latest_tickers.drop(columns=["Date", "Cash Balance", "Total Equity", "Action", "Current Price", "PnL", "Total Value"], inplace=True)
+        latest_tickers.rename(columns={
+            "Ticker": "ticker",
+            "Shares": "shares",
+            "Stop Loss": "stop_loss",
+            "Cost Basis": "buy_price"
+        }, inplace=True)
+        latest_tickers["cost_basis"] = latest_tickers["shares"] * latest_tickers["buy_price"]
+        portfolio = latest_tickers.reset_index(drop=True)
+
+    df = df[df["Ticker"] == "TOTAL"].copy()
     df["Date"] = pd.to_datetime(df["Date"])
     latest = df.sort_values("Date").iloc[-1]
     cash = float(latest["Cash Balance"])
-    return latest_tickers, cash
+
+    return portfolio, cash
+
 
