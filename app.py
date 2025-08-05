@@ -437,7 +437,7 @@ def show_watchlist_sidebar() -> None:
         header = sidebar.container()
         hcol1, hcol2 = header.columns([4, 1])
         hcol1.subheader("Watchlist")
-        if hcol2.button("\uD83D\uDD04", key="refresh_watchlist", help="Refresh prices"):
+        if hcol2.button("🔄", key="refresh_watchlist", help="Refresh prices"):
             updated: dict[str, float | None] = {}
             for t in st.session_state.watchlist:
                 updated[t] = fetch_price(t)
