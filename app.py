@@ -299,6 +299,7 @@ def init_session_state() -> None:
         "s_ticker": "",
         "s_shares": 0.0,
         "s_price": 0.0,
+        "ac_amount": 0.0,
     }.items():
         st.session_state.setdefault(key, default)
 
@@ -310,9 +311,8 @@ def init_session_state() -> None:
 
 
 def show_buy_form() -> None:
-    """Render and process the buy form."""
+    """Render and process the buy form inside an expander."""
 
-    st.subheader("Log a Buy")
     def submit_buy() -> None:
         """Handle Buy submission and reset the form via callback."""
 
@@ -328,29 +328,23 @@ def show_buy_form() -> None:
             st.session_state.portfolio = port
             st.session_state.cash = cash
             st.session_state.feedback = ("success", msg)
-            # Remove widget state keys so ``init_session_state``
-            # reinitialises them on the next rerun.  This clears the
-            # form fields without setting values for widgets that are
-            # currently in use, avoiding StreamlitAPIException.
-            for key in ("b_ticker", "b_shares", "b_price", "b_stop"):
-                st.session_state.pop(key, None)
         else:
             st.session_state.feedback = ("error", msg)
 
-    with st.form("buy_form"):
-        st.text_input("Ticker", key="b_ticker")
-        st.number_input("Shares", min_value=0.0, step=1.0, key="b_shares")
-        st.number_input("Price", min_value=0.0, format="%.2f", key="b_price")
-        st.number_input("Stop-loss", min_value=0.0, format="%.2f", key="b_stop")
-        # Use ``on_click`` callback so state mutations occur in the
-        # callback rather than in-line after widget definition.
-        st.form_submit_button("Submit Buy", on_click=submit_buy)
+    with st.expander("Log a Buy"):
+        with st.form("buy_form", clear_on_submit=True):
+            st.text_input("Ticker", key="b_ticker")
+            st.number_input("Shares", min_value=0.0, step=1.0, key="b_shares")
+            st.number_input("Price", min_value=0.0, format="%.2f", key="b_price")
+            st.number_input("Stop-loss", min_value=0.0, format="%.2f", key="b_stop")
+            # Use ``on_click`` callback so state mutations occur in the
+            # callback rather than in-line after widget definition.
+            st.form_submit_button("Submit Buy", on_click=submit_buy)
 
 
 def show_sell_form() -> None:
-    """Render and process the sell form."""
+    """Render and process the sell form inside an expander."""
 
-    st.subheader("Log a Sell")
     def submit_sell() -> None:
         """Handle Sell submission and reset the form via callback."""
 
@@ -365,18 +359,49 @@ def show_sell_form() -> None:
             st.session_state.portfolio = port
             st.session_state.cash = cash
             st.session_state.feedback = ("success", msg)
-            # Remove widget state keys for a clean form next run.
-            for key in ("s_ticker", "s_shares", "s_price"):
-                st.session_state.pop(key, None)
         else:
             st.session_state.feedback = ("error", msg)
 
-    with st.form("sell_form"):
-        st.text_input("Ticker", key="s_ticker")
-        st.number_input("Shares", min_value=0.0, step=1.0, key="s_shares")
-        st.number_input("Price", min_value=0.0, format="%.2f", key="s_price")
-        # Trigger callback to perform sell and clear state safely.
-        st.form_submit_button("Submit Sell", on_click=submit_sell)
+    with st.expander("Log a Sell"):
+        with st.form("sell_form", clear_on_submit=True):
+            st.text_input("Ticker", key="s_ticker")
+            st.number_input("Shares", min_value=0.0, step=1.0, key="s_shares")
+            st.number_input("Price", min_value=0.0, format="%.2f", key="s_price")
+            # Trigger callback to perform sell and clear state safely.
+            st.form_submit_button("Submit Sell", on_click=submit_sell)
+
+
+def show_add_cash_form() -> None:
+    """Render a form that lets the user add cash to the account."""
+
+    st.subheader("Add Cash")
+
+    def submit_cash() -> None:
+        """Update cash balance and persist the change."""
+
+        amount = st.session_state.ac_amount
+        if amount <= 0:
+            st.session_state.feedback = (
+                "error",
+                "Amount must be greater than zero.",
+            )
+            return
+
+        st.session_state.cash += amount
+        save_portfolio_snapshot(st.session_state.portfolio, st.session_state.cash)
+        st.session_state.feedback = (
+            "success",
+            f"Added ${amount:.2f} to cash balance.",
+        )
+
+    with st.form("add_cash_form", clear_on_submit=True):
+        st.number_input(
+            "Amount",
+            min_value=0.0,
+            format="%.2f",
+            key="ac_amount",
+        )
+        st.form_submit_button("Add Cash", on_click=submit_cash)
 
 
 def main() -> None:
@@ -399,18 +424,33 @@ def main() -> None:
     if st.session_state.get("needs_cash", False):
         # Prompt for starting cash on first-time use
         st.subheader("Initialize Portfolio")
-        with st.form("init_cash_form"):
-            start_cash = st.number_input(
-                "Enter starting cash", min_value=0.0, format="%.2f"
+        with st.form("init_cash_form", clear_on_submit=True):
+            start_cash_raw = st.text_input(
+                "Enter starting cash",
+                key="start_cash",
+                placeholder="0.00",
             )
             init_submit = st.form_submit_button("Set Starting Cash")
         if init_submit:
-            st.session_state.cash = start_cash
-            st.session_state.needs_cash = False
-            save_portfolio_snapshot(
-                st.session_state.portfolio, st.session_state.cash
-            )
-            st.success(f"Starting cash of ${start_cash:.2f} recorded.")
+            try:
+                start_cash = float(start_cash_raw)
+                if start_cash <= 0:
+                    raise ValueError
+            except ValueError:
+                st.session_state.feedback = (
+                    "error",
+                    "Please enter a positive number.",
+                )
+            else:
+                st.session_state.cash = start_cash
+                st.session_state.needs_cash = False
+                save_portfolio_snapshot(
+                    st.session_state.portfolio, st.session_state.cash
+                )
+                st.session_state.feedback = (
+                    "success",
+                    f"Starting cash of ${start_cash:.2f} recorded.",
+                )
             st.rerun()
         return
 
@@ -441,6 +481,7 @@ def main() -> None:
         st.dataframe(st.session_state.portfolio)
     st.metric("Cash Balance", f"${st.session_state.cash:.2f}")
 
+    show_add_cash_form()
     show_buy_form()
     show_sell_form()
 
