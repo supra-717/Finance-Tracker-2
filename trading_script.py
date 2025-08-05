@@ -1,3 +1,5 @@
+# Improved user prompts and guidance for manual trades and daily summaries
+# (2025-08-04 usability update)
 """Utilities for maintaining the ChatGPT micro cap portfolio.
 
 The script processes portfolio positions, logs trades, and prints daily
@@ -87,15 +89,20 @@ Are you sure you want to do this? To exit, enter 1. """)
 
     while True:
         action = input(
-            f""" You have {cash} in cash.
-Would you like to log a manual trade? Enter 'b' for buy, 's' for sell, or press Enter to continue: """
+            f"""You have ${cash:.2f} in cash.
+Would you like to buy or sell a stock today?
+Type 'b' to buy, 's' to sell, or press Enter to skip: """
         ).strip().lower()
         if action == "b":
             try:
-                ticker = input("Enter ticker symbol: ").strip().upper()
-                shares = float(input("Enter number of shares: "))
-                buy_price = float(input("Enter buy price: "))
-                stop_loss = float(input("Enter stop loss: "))
+                ticker = input("What is the stock's ticker symbol (e.g. PLTR)? ").strip().upper()
+                shares = float(input("How many shares do you want to buy? "))
+                buy_price = float(input("At what price per share do you want to buy it? "))
+                stop_loss = float(
+                    input(
+                        "Set your stop-loss price (the price where you'll sell to limit loss): "
+                    )
+                )
                 if shares <= 0 or buy_price <= 0 or stop_loss <= 0:
                     raise ValueError
             except ValueError:
@@ -107,9 +114,9 @@ Would you like to log a manual trade? Enter 'b' for buy, 's' for sell, or press 
             continue
         if action == "s":
             try:
-                ticker = input("Enter ticker symbol: ").strip().upper()
-                shares = float(input("Enter number of shares to sell: "))
-                sell_price = float(input("Enter sell price: "))
+                ticker = input("What is the stock's ticker symbol (e.g. PLTR)? ").strip().upper()
+                shares = float(input("How many shares do you want to sell? "))
+                sell_price = float(input("At what price per share do you want to sell it? "))
                 if shares <= 0 or sell_price <= 0:
                     raise ValueError
             except ValueError:
@@ -154,6 +161,10 @@ Would you like to log a manual trade? Enter 'b' for buy, 's' for sell, or press 
                 action = "SELL - Stop Loss Triggered"
                 cash += value
                 portfolio_df = log_sell(ticker, shares, price, cost, pnl, portfolio_df)
+                print(
+                    f"🔻 Stop-loss triggered: Sold {shares} shares of {ticker} at ${price} (Buy price was ${cost})\n"
+                    f"You lost ${-pnl} on this position."
+                )
             else:
                 price = close_price
                 value = round(price * shares, 2)
@@ -161,6 +172,9 @@ Would you like to log a manual trade? Enter 'b' for buy, 's' for sell, or press 
                 action = "HOLD"
                 total_value += value
                 total_pnl += pnl
+                print(
+                    f"\u2705 Holding {ticker} \u2014 Current price: ${price} | PnL: ${pnl}"
+                )
 
             row = {
                 "Date": today,
@@ -193,6 +207,14 @@ Would you like to log a manual trade? Enter 'b' for buy, 's' for sell, or press 
         "Total Equity": round(total_value + cash, 2),
     }
     results.append(total_row)
+
+    print(
+        f"\nToday's totals:\n"
+        f"- Total stock value: ${round(total_value, 2)}\n"
+        f"- Total PnL: ${round(total_pnl, 2)}\n"
+        f"- Cash balance: ${round(cash, 2)}\n"
+        f"- Total equity: ${round(total_value + cash, 2)}\n"
+    )
 
     df = pd.DataFrame(results)
     if PORTFOLIO_CSV.exists():
@@ -246,8 +268,8 @@ def log_manual_buy(
 ) -> tuple[float, pd.DataFrame]:
     """Log a manual purchase and append to the portfolio."""
     check = input(
-        f"""You are currently trying to buy {shares} shares of {ticker} with a price of {buy_price} and a stoploss of {stoploss}.
-        If this a mistake, type "1". """
+        f"You’re about to buy {shares} shares of {ticker} at ${buy_price} with a stop-loss at ${stoploss}.\n"
+        "Type 1 to cancel, or press Enter to confirm: "
     )
     if check == "1":
         print("Returning...")
@@ -324,8 +346,8 @@ def log_manual_sell(
 ) -> tuple[float, pd.DataFrame]:
     """Log a manual sale and update the portfolio."""
     reason = input(
-        f"""You are currently trying to sell {shares_sold} shares of {ticker} at a price of {sell_price}.
-If this is a mistake, enter 1. """
+        f"You’re about to sell {shares_sold} shares of {ticker} at ${sell_price}.\n"
+        "Enter your reason for selling, or type 1 to cancel: "
     )
 
     if reason == "1":
