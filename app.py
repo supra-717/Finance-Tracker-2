@@ -1,4 +1,4 @@
-"""Streamlit app for managing the ChatGPT micro-cap portfolio.
+"""Streamlit app for local portfolio tracking and AI‑assisted trading.
 
 The original implementation grew organically and contained a mix of UI and
 backend logic, duplicated blocks, and sparse documentation.  This refactor
@@ -9,6 +9,7 @@ to understand and extend.
 
 from datetime import datetime
 from pathlib import Path
+import json
 
 import pandas as pd
 import streamlit as st
@@ -20,6 +21,8 @@ import yfinance as yf
 DATA_DIR = Path(__file__).resolve().parent / "Scripts and CSV Files"
 PORTFOLIO_CSV = DATA_DIR / "chatgpt_portfolio_update.csv"
 TRADE_LOG_CSV = DATA_DIR / "chatgpt_trade_log.csv"
+# File used to persist the sidebar watchlist between runs.
+WATCHLIST_FILE = Path(__file__).resolve().parent / "watchlist.json"
 
 # Today's date used for all new logs.
 TODAY = datetime.today().strftime("%Y-%m-%d")
@@ -27,6 +30,32 @@ TODAY = datetime.today().strftime("%Y-%m-%d")
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
+
+def load_watchlist() -> list[str]:
+    """Return saved watchlist tickers from ``WATCHLIST_FILE``.
+
+    The file stores a simple JSON list.  Any problems reading the file result
+    in an empty list so the UI can proceed without crashing.
+    """
+
+    if WATCHLIST_FILE.exists():
+        try:
+            data = json.loads(WATCHLIST_FILE.read_text())
+            return [str(t).upper() for t in data if isinstance(t, str)]
+        except Exception:
+            pass
+    return []
+
+
+def save_watchlist(tickers: list[str]) -> None:
+    """Persist ``tickers`` to ``WATCHLIST_FILE`` as JSON."""
+
+    try:
+        WATCHLIST_FILE.write_text(json.dumps(tickers))
+    except Exception:
+        # Persistence failures shouldn't crash the app; users can still rely on
+        # session state within the current run.
+        pass
 
 def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
     """Return the latest portfolio and cash balance.
@@ -300,6 +329,7 @@ def init_session_state() -> None:
         "s_shares": 0.0,
         "s_price": 0.0,
         "ac_amount": 0.0,
+        "lookup_symbol": "",
         "watchlist": [],
         # Cache of latest watchlist prices fetched via the refresh button.
         "watchlist_prices": {},
@@ -313,6 +343,10 @@ def init_session_state() -> None:
         st.session_state.portfolio = port
         st.session_state.cash = cash
         st.session_state.needs_cash = needs_cash
+
+    # Load a persisted watchlist from disk only on first run.
+    if not st.session_state.watchlist and WATCHLIST_FILE.exists():
+        st.session_state.watchlist = load_watchlist()
 
 
 def show_watchlist_sidebar() -> None:
@@ -333,6 +367,7 @@ def show_watchlist_sidebar() -> None:
         # Drop any cached prices for tickers that moved into the portfolio.
         for t in removed:
             st.session_state.watchlist_prices.pop(t, None)
+        save_watchlist(st.session_state.watchlist)
         st.session_state.feedback = (
             "info",
             f"Removed {', '.join(removed)} from watchlist (now in portfolio).",
@@ -358,7 +393,12 @@ def show_watchlist_sidebar() -> None:
                 else:
                     st.session_state.watchlist.append(sym)
                     st.session_state.watchlist_prices[sym] = price
+                    save_watchlist(st.session_state.watchlist)
                     st.session_state.feedback = ("success", f"{sym} added to watchlist.")
+                # Clear the lookup field after any attempt so the user can
+                # quickly search for another symbol and the sidebar refreshes.
+                st.session_state.lookup_symbol = ""
+                st.rerun()
         except Exception:
             sidebar.error("Ticker not found.")
 
@@ -406,9 +446,11 @@ def show_watchlist_sidebar() -> None:
             item.markdown("<div class='watchlist-item'>", unsafe_allow_html=True)
             col1, col2 = item.columns([4,1])
             col1.write(f"{t}: {display_price}")
-            if col2.button("✖", key=f"rm_{t}"):
+            # Display red circle "X" with a tooltip for clarity when removing.
+            if col2.button("✖", key=f"rm_{t}", help=f"Remove {t}"):
                 st.session_state.watchlist.remove(t)
                 st.session_state.watchlist_prices.pop(t, None)
+                save_watchlist(st.session_state.watchlist)
                 st.session_state.feedback = ("info", f"{t} removed from watchlist.")
                 st.rerun()
             item.markdown("</div>", unsafe_allow_html=True)
@@ -436,6 +478,7 @@ def show_buy_form() -> None:
             if ticker in st.session_state.watchlist:
                 st.session_state.watchlist.remove(ticker)
                 st.session_state.watchlist_prices.pop(ticker, None)
+                save_watchlist(st.session_state.watchlist)
                 msg += f" {ticker} removed from watchlist."
             st.session_state.feedback = ("success", msg)
         else:
@@ -482,7 +525,7 @@ def show_sell_form() -> None:
 
 
 def show_cash_section() -> None:
-    """Display cash balance with an inline form to add funds."""
+    """Display cash balance and provide a toggleable form to add funds."""
 
     def submit_cash() -> None:
         """Update cash balance, persist change, then hide the form."""
@@ -501,38 +544,42 @@ def show_cash_section() -> None:
             "success",
             f"Added ${amount:.2f} to cash balance.",
         )
-        # Hide the form again after successful submission.
         st.session_state.show_cash_form = False
+        st.session_state.ac_amount = 0.0
+
+    def cancel_cash() -> None:
+        """Hide the add-cash form without changing the balance."""
+
+        st.session_state.show_cash_form = False
+        st.session_state.ac_amount = 0.0
 
     st.subheader("Cash Balance")
-    col1, col2 = st.columns([3, 1])
+    # Display the current cash amount.
+    st.markdown(f"<h3>${st.session_state.cash:.2f}</h3>", unsafe_allow_html=True)
 
-    # Display the cash amount without a redundant label.
-    with col1:
-        st.markdown(f"<h3>${st.session_state.cash:.2f}</h3>", unsafe_allow_html=True)
-
-    with col2:
-        if st.session_state.show_cash_form:
-            # Inline form shown when the button is clicked.
-            with st.form("add_cash_form", clear_on_submit=True):
-                st.number_input(
-                    "Amount",
-                    min_value=0.0,
-                    format="%.2f",
-                    key="ac_amount",
-                )
-                st.form_submit_button("Add Cash", on_click=submit_cash)
-        else:
-            st.button(
-                "Add Cash",
-                on_click=lambda: st.session_state.update(show_cash_form=True),
+    if st.session_state.show_cash_form:
+        # Form appears directly under the balance when the button is clicked.
+        with st.form("add_cash_form", clear_on_submit=True):
+            st.number_input(
+                "Amount",
+                min_value=0.0,
+                format="%.2f",
+                key="ac_amount",
             )
+            col_add, col_cancel = st.columns(2)
+            col_add.form_submit_button("Add", on_click=submit_cash)
+            col_cancel.form_submit_button("Cancel", on_click=cancel_cash)
+    else:
+        st.button(
+            "Add Cash",
+            on_click=lambda: st.session_state.update(show_cash_form=True),
+        )
 
 
 def main() -> None:
     """Entry point for the Streamlit UI."""
 
-    st.title("ChatGPT Portfolio Manager")
+    st.title("AI Assisted Trading")
     init_session_state()
     show_watchlist_sidebar()
 
