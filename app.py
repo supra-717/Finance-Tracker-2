@@ -362,8 +362,7 @@ def init_session_state() -> None:
         "b_ticker": "",
         "b_shares": 0.0,
         "b_price": 0.0,
-        "b_stop": 0.0,
-        "b_stop_mode": "None",
+        # Percentage below the buy price to place a stop loss.
         "b_stop_pct": 0.0,
         "s_ticker": "",
         "s_shares": 0.0,
@@ -518,11 +517,17 @@ def show_buy_form() -> None:
     def submit_buy() -> None:
         """Handle Buy submission and reset the form via callback."""
 
+        stop_price = 0.0
+        if st.session_state.b_stop_pct > 0:
+            stop_price = st.session_state.b_price * (
+                1 - st.session_state.b_stop_pct / 100
+            )
+
         ok, msg, port, cash = manual_buy(
             st.session_state.b_ticker,
             st.session_state.b_shares,
             st.session_state.b_price,
-            st.session_state.b_stop,
+            stop_price,
             st.session_state.portfolio,
             st.session_state.cash,
         )
@@ -541,7 +546,7 @@ def show_buy_form() -> None:
             st.session_state.b_ticker = ""
             st.session_state.b_shares = 0.0
             st.session_state.b_price = 0.0
-            st.session_state.b_stop = 0.0
+            st.session_state.b_stop_pct = 0.0
         else:
             st.session_state.feedback = ("error", msg)
 
@@ -555,20 +560,14 @@ def show_buy_form() -> None:
                 "Price", min_value=0.0, format="%.2f", key="b_price", value=latest or 0.0
             )
 
-            stop_mode = st.selectbox(
-                "Stop Loss Type", ["None", "Price", "% below price"], key="b_stop_mode"
+            st.number_input(
+                "Stop Loss %", min_value=0.0, format="%.1f", key="b_stop_pct"
             )
-            if stop_mode == "Price":
-                st.number_input(
-                    "Stop-loss", min_value=0.0, format="%.2f", key="b_stop"
+            if st.session_state.b_price > 0 and st.session_state.b_stop_pct > 0:
+                calc_stop = st.session_state.b_price * (
+                    1 - st.session_state.b_stop_pct / 100
                 )
-            elif stop_mode == "% below price":
-                pct = st.number_input(
-                    "Stop-loss %", min_value=0.0, format="%.1f", key="b_stop_pct"
-                )
-                st.session_state.b_stop = st.session_state.b_price * (1 - pct / 100)
-            else:
-                st.session_state.b_stop = 0.0
+                st.caption(f"Stop loss price: ${calc_stop:.2f}")
 
             # Use ``on_click`` callback so state mutations occur in the
             # callback rather than in-line after widget definition.
@@ -728,287 +727,355 @@ def main() -> None:
 
     st.title("AI Assisted Trading")
     init_session_state()
-    show_watchlist_sidebar()
-    show_onboarding()
 
-    theme = st.sidebar.radio("Theme", ["Light", "Dark"], key="theme")
-    if theme == "Dark":
-        st.write(
-            "<style>body { background-color: #0e1117; color: white; }</style>",
-            unsafe_allow_html=True,
-        )
+    dashboard_tab, guide_tab = st.tabs(["Dashboard", "User Guide"])
 
-    # Display feedback messages once and remove from session state so they
-    # do not linger between reruns.
-    feedback = st.session_state.pop("feedback", None)
-    if feedback:
-        kind, text = feedback
-        if kind == "success":
-            st.success(text)
-        elif kind == "error":
-            st.error(text)
-        else:
-            st.info(text)
+    with dashboard_tab:
+        show_watchlist_sidebar()
+        show_onboarding()
 
-    if st.session_state.get("needs_cash", False):
-        # Prompt for starting cash on first-time use.
-        st.subheader("Initialize Portfolio")
-        with st.form("init_cash_form", clear_on_submit=True):
-            start_cash_raw = st.text_input(
-                "Enter starting cash",
-                key="start_cash",
-                placeholder="0.00",
+        theme = st.sidebar.radio("Theme", ["Light", "Dark"], key="theme")
+        if theme == "Dark":
+            st.write(
+                "<style>body { background-color: #0e1117; color: white; }</style>",
+                unsafe_allow_html=True,
             )
-            init_submit = st.form_submit_button("Set Starting Cash")
-        if init_submit:
-            try:
-                start_cash = float(start_cash_raw)
-                if start_cash <= 0:
-                    raise ValueError
-            except ValueError:
-                st.session_state.feedback = (
-                    "error",
-                    "Please enter a positive number.",
+
+        # Display feedback messages once and remove from session state so they
+        # do not linger between reruns.
+        feedback = st.session_state.pop("feedback", None)
+        if feedback:
+            kind, text = feedback
+            if kind == "success":
+                st.success(text)
+            elif kind == "error":
+                st.error(text)
+            else:
+                st.info(text)
+
+        if st.session_state.get("needs_cash", False):
+            # Prompt for starting cash on first-time use.
+            st.subheader("Initialize Portfolio")
+            with st.form("init_cash_form", clear_on_submit=True):
+                start_cash_raw = st.text_input(
+                    "Enter starting cash",
+                    key="start_cash",
+                    placeholder="0.00",
+                )
+                init_submit = st.form_submit_button("Set Starting Cash")
+            if init_submit:
+                try:
+                    start_cash = float(start_cash_raw)
+                    if start_cash <= 0:
+                        raise ValueError
+                except ValueError:
+                    st.session_state.feedback = (
+                        "error",
+                        "Please enter a positive number.",
+                    )
+                else:
+                    st.session_state.cash = start_cash
+                    st.session_state.needs_cash = False
+                    save_portfolio_snapshot(
+                        st.session_state.portfolio, st.session_state.cash
+                    )
+                    st.session_state.feedback = (
+                        "success",
+                        f"Starting cash of ${start_cash:.2f} recorded.",
+                    )
+                st.rerun()
+        else:
+            # Always refresh today's snapshot and totals once cash is initialised
+            summary_df = save_portfolio_snapshot(
+                st.session_state.portfolio, st.session_state.cash
+            )
+
+            # --------------------------------------------------------------
+            # Section 1: Cash Balance & Add Cash
+            # --------------------------------------------------------------
+            show_cash_section()
+
+            # --------------------------------------------------------------
+            # Section 2: Current Portfolio Table
+            # --------------------------------------------------------------
+            st.subheader("Current Portfolio")
+            port_table = summary_df[summary_df["Ticker"] != "TOTAL"].copy()
+            if port_table.empty:
+                st.info(
+                    "Your portfolio is empty. Use the Buy form below to add your first position."
                 )
             else:
-                st.session_state.cash = start_cash
-                st.session_state.needs_cash = False
-                save_portfolio_snapshot(
-                    st.session_state.portfolio, st.session_state.cash
+                auto_refresh = st.checkbox(
+                    "Auto-refresh every 30 min", key="auto_refresh"
                 )
-                st.session_state.feedback = (
-                    "success",
-                    f"Starting cash of ${start_cash:.2f} recorded.",
+                if auto_refresh:
+                    try:  # pragma: no cover - optional dependency
+                        from streamlit_autorefresh import st_autorefresh
+
+                        st_autorefresh(interval=30 * 60 * 1000, key="portfolio_refresh")
+                    except Exception:  # pragma: no cover - import-time failure
+                        st.warning(
+                            "Install streamlit-autorefresh for auto refresh support."
+                        )
+
+                if st.button("Refresh"):
+                    st.experimental_rerun()
+
+                st.caption(
+                    f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                 )
-            st.rerun()
-        return
 
-    # Always refresh today's snapshot and totals once cash is initialised
-    summary_df = save_portfolio_snapshot(
-        st.session_state.portfolio, st.session_state.cash
-    )
+                # Ensure numeric types for calculations and handle invalid data.
+                numeric_cols = [
+                    "Shares",
+                    "Cost Basis",
+                    "Current Price",
+                    "Stop Loss",
+                    "Total Value",
+                    "PnL",
+                ]
+                for col in numeric_cols:
+                    if col in port_table.columns:
+                        port_table[col] = pd.to_numeric(
+                            port_table[col], errors="coerce"
+                        )
 
-    # ------------------------------------------------------------------
-    # Section 1: Cash Balance & Add Cash
-    # ------------------------------------------------------------------
-    show_cash_section()
+                if {"Current Price", "Cost Basis"}.issubset(port_table.columns):
+                    port_table["Pct Change"] = (
+                        (port_table["Current Price"] - port_table["Cost Basis"])
+                        / port_table["Cost Basis"]
+                        * 100
+                    )
+                else:
+                    port_table["Pct Change"] = pd.NA
+                invalid = port_table["Pct Change"].isna()
+                if invalid.any():
+                    missing = ", ".join(
+                        port_table.loc[invalid, "Ticker"].astype(str)
+                    )
+                    st.warning(f"Unable to compute Pct Change for: {missing}")
 
-    # ------------------------------------------------------------------
-    # Section 2: Current Portfolio Table
-    # ------------------------------------------------------------------
-    st.subheader("Current Portfolio")
-
-    # ------------------------------------------------------------------
-    # Refresh controls
-    # ------------------------------------------------------------------
-    auto_refresh = st.checkbox("Auto-refresh every 30 min", key="auto_refresh")
-    if auto_refresh:
-        try:  # pragma: no cover - optional dependency
-            from streamlit_autorefresh import st_autorefresh
-
-            st_autorefresh(interval=30 * 60 * 1000, key="portfolio_refresh")
-        except Exception:  # pragma: no cover - import-time failure
-            st.warning("Install streamlit-autorefresh for auto refresh support.")
-
-    if st.button("Refresh"):
-        st.experimental_rerun()
-
-    port_table = summary_df[summary_df["Ticker"] != "TOTAL"].copy()
-
-    st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-    if port_table.empty:
-        st.info("Your portfolio is empty. Log a trade below.")
-    else:
-        # Ensure numeric types for calculations and handle invalid data.
-        numeric_cols = [
-            "Shares",
-            "Cost Basis",
-            "Current Price",
-            "Stop Loss",
-            "Total Value",
-            "PnL",
-        ]
-        for col in numeric_cols:
-            if col in port_table.columns:
-                port_table[col] = pd.to_numeric(port_table[col], errors="coerce")
-
-        if {"Current Price", "Cost Basis"}.issubset(port_table.columns):
-            port_table["Pct Change"] = (
-                (port_table["Current Price"] - port_table["Cost Basis"])
-                / port_table["Cost Basis"]
-                * 100
-            )
-        else:
-            port_table["Pct Change"] = pd.NA
-        invalid = port_table["Pct Change"].isna()
-        if invalid.any():
-            missing = ", ".join(port_table.loc[invalid, "Ticker"].astype(str))
-            st.warning(f"Unable to compute Pct Change for: {missing}")
-
-        # Rename and reorder columns for display
-        port_table = port_table.rename(
-            columns={"Cost Basis": "Buy Price", "Total Value": "Value"}
-        )
-        port_table = port_table[
-            [
-                "Ticker",
-                "Shares",
-                "Buy Price",
-                "Current Price",
-                "Pct Change",
-                "Stop Loss",
-                "Value",
-                "PnL",
-                "Action",
-            ]
-        ]
-
-        required_columns = [
-            "Ticker",
-            "Shares",
-            "Buy Price",
-            "Current Price",
-            "Pct Change",
-            "Stop Loss",
-            "Value",
-            "PnL",
-            "Action",
-        ]
-        missing_cols = [col for col in required_columns if col not in port_table.columns]
-        if missing_cols:
-            st.error(f"Missing columns: {', '.join(missing_cols)}")
-            st.write(port_table.head())
-        else:
-            def fmt_currency(x: float) -> str:
-                return f"${x:,.2f}"
-
-            def fmt_percent(x: float) -> str:
-                sign = "+" if x > 0 else ""
-                arrow = "↑" if x > 0 else ("↓" if x < 0 else "")
-                return f"{sign}{x:.1f}% {arrow}".strip()
-
-            def fmt_shares(x: float) -> str:
-                return f"{int(x):,}"
-
-            def highlight_pct(val: float) -> str:
-                if val > 5:
-                    return "background-color: #d4ffd4"  # light green
-                if val < -5:
-                    return "background-color: #ffd4d4"  # light red
-                return ""
-
-            def color_pnl(val: float) -> str:
-                if val > 0:
-                    return "color: green"
-                if val < 0:
-                    return "color: red"
-                return ""
-
-            def highlight_stop(row: pd.Series) -> list[str]:
-                price = row.get("Current Price", None)
-                stop = row.get("Stop Loss", None)
-                styles = ["" for _ in row.index]
-                if (
-                    price is not None
-                    and stop is not None
-                    and pd.notna(price)
-                    and pd.notna(stop)
-                    and stop > 0
-                    and abs(price - stop) / stop <= 0.05
-                ):
-                    idx = row.index.get_loc("Stop Loss")
-                    styles[idx] = "background-color: #ffe8cc"
-                return styles
-
-            numeric_display = [
-                "Shares",
-                "Buy Price",
-                "Current Price",
-                "Pct Change",
-                "Stop Loss",
-                "Value",
-                "PnL",
-            ]
-
-            styled = (
-                port_table.style.format(
-                    {
-                        "Shares": fmt_shares,
-                        "Buy Price": fmt_currency,
-                        "Current Price": fmt_currency,
-                        "Stop Loss": fmt_currency,
-                        "Value": fmt_currency,
-                        "PnL": fmt_currency,
-                        "Pct Change": fmt_percent,
-                    }
+                # Rename and reorder columns for display
+                port_table = port_table.rename(
+                    columns={"Cost Basis": "Buy Price", "Total Value": "Value"}
                 )
-                .set_properties(subset=numeric_display, **{"text-align": "right"})
-                .applymap(highlight_pct, subset=["Pct Change"])
-                .applymap(color_pnl, subset=["PnL"])
-                .apply(highlight_stop, axis=1)
-                .set_table_styles(
+                port_table = port_table[
                     [
-                        {
-                            "selector": "th",
-                            "props": [("font-size", "16px"), ("text-align", "center")],
-                        },
-                        {
-                            "selector": "td",
-                            "props": [("font-size", "16px"), ("color", "black")],
-                        },
+                        "Ticker",
+                        "Shares",
+                        "Buy Price",
+                        "Current Price",
+                        "Pct Change",
+                        "Stop Loss",
+                        "Value",
+                        "PnL",
+                        "Action",
                     ]
+                ]
+
+                required_columns = [
+                    "Ticker",
+                    "Shares",
+                    "Buy Price",
+                    "Current Price",
+                    "Pct Change",
+                    "Stop Loss",
+                    "Value",
+                    "PnL",
+                    "Action",
+                ]
+                missing_cols = [
+                    col for col in required_columns if col not in port_table.columns
+                ]
+                if missing_cols:
+                    st.error(f"Missing columns: {', '.join(missing_cols)}")
+                    st.write(port_table.head())
+                else:
+                    def fmt_currency(x: float) -> str:
+                        return f"${x:,.2f}"
+
+                    def fmt_percent(x: float) -> str:
+                        sign = "+" if x > 0 else ""
+                        arrow = "↑" if x > 0 else ("↓" if x < 0 else "")
+                        return f"{sign}{x:.1f}% {arrow}".strip()
+
+                    def fmt_shares(x: float) -> str:
+                        return f"{int(x):,}"
+
+                    def highlight_pct(val: float) -> str:
+                        if val > 5:
+                            return "background-color: #d4ffd4"  # light green
+                        if val < -5:
+                            return "background-color: #ffd4d4"  # light red
+                        return ""
+
+                    def color_pnl(val: float) -> str:
+                        if val > 0:
+                            return "color: green"
+                        if val < 0:
+                            return "color: red"
+                        return ""
+
+                    def highlight_stop(row: pd.Series) -> list[str]:
+                        price = row.get("Current Price", None)
+                        stop = row.get("Stop Loss", None)
+                        styles = ["" for _ in row.index]
+                        if (
+                            price is not None
+                            and stop is not None
+                            and pd.notna(price)
+                            and pd.notna(stop)
+                            and stop > 0
+                            and abs(price - stop) / stop <= 0.05
+                        ):
+                            idx = row.index.get_loc("Stop Loss")
+                            styles[idx] = "background-color: #ffe8cc"
+                        return styles
+
+                    numeric_display = [
+                        "Shares",
+                        "Buy Price",
+                        "Current Price",
+                        "Pct Change",
+                        "Stop Loss",
+                        "Value",
+                        "PnL",
+                    ]
+
+                    styled = (
+                        port_table.style.format(
+                            {
+                                "Shares": fmt_shares,
+                                "Buy Price": fmt_currency,
+                                "Current Price": fmt_currency,
+                                "Stop Loss": fmt_currency,
+                                "Value": fmt_currency,
+                                "PnL": fmt_currency,
+                                "Pct Change": fmt_percent,
+                            }
+                        )
+                        .set_properties(
+                            subset=numeric_display, **{"text-align": "right"}
+                        )
+                        .applymap(highlight_pct, subset=["Pct Change"])
+                        .applymap(color_pnl, subset=["PnL"])
+                        .apply(highlight_stop, axis=1)
+                        .set_table_styles(
+                            [
+                                {
+                                    "selector": "th",
+                                    "props": [
+                                        ("font-size", "16px"),
+                                        ("text-align", "center"),
+                                    ],
+                                },
+                                {
+                                    "selector": "td",
+                                    "props": [
+                                        ("font-size", "16px"),
+                                        ("color", "black"),
+                                    ],
+                                },
+                            ]
+                        )
+                    )
+
+                    column_config = {
+                        "Stop Loss": st.column_config.NumberColumn(
+                            "Stop Loss",
+                            help="Price at which the stock will be sold to limit loss",
+                        ),
+                        "Pct Change": st.column_config.NumberColumn(
+                            "Pct Change", help="Percentage change since purchase"
+                        ),
+                        "PnL": st.column_config.NumberColumn(
+                            "PnL", help="Profit or loss"
+                        ),
+                        "Value": st.column_config.NumberColumn(
+                            "Value", help="Current market value"
+                        ),
+                        "Buy Price": st.column_config.NumberColumn(
+                            "Buy Price", help="Average price paid per share"
+                        ),
+                    }
+                    st.dataframe(
+                        styled, use_container_width=True, column_config=column_config
+                    )
+
+            show_buy_form()
+            if not port_table.empty:
+                show_sell_form()
+
+            # --------------------------------------------------------------
+            # Section 3: Daily Summary
+            # --------------------------------------------------------------
+            st.subheader("Daily Summary")
+            if st.button("Generate Daily Summary"):
+                if not summary_df.empty:
+                    summary_md = build_daily_summary(summary_df)
+                    # Present the markdown in a code block so users can copy/paste
+                    # directly into an LLM chat window.
+                    st.code(summary_md, language="markdown")
+                else:
+                    st.info("No summary available.")
+
+            # --------------------------------------------------------------
+            # Section 4: Downloads and Error Log
+            # --------------------------------------------------------------
+            if not st.session_state.portfolio.empty:
+                csv = st.session_state.portfolio.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "Download Portfolio", csv, "portfolio_snapshot.csv", "text/csv"
                 )
-            )
+            if TRADE_LOG_CSV.exists():
+                tl = pd.read_csv(TRADE_LOG_CSV)
+                csv = tl.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "Download Trade Log", csv, "trade_log.csv", "text/csv"
+                )
 
-            column_config = {
-                "Stop Loss": st.column_config.NumberColumn(
-                    "Stop Loss", help="Price at which the stock will be sold to limit loss"
-                ),
-                "Pct Change": st.column_config.NumberColumn(
-                    "Pct Change", help="Percentage change since purchase"
-                ),
-                "PnL": st.column_config.NumberColumn("PnL", help="Profit or loss"),
-                "Value": st.column_config.NumberColumn(
-                    "Value", help="Current market value"
-                ),
-                "Buy Price": st.column_config.NumberColumn(
-                    "Buy Price", help="Average price paid per share"
-                ),
-            }
-            st.dataframe(styled, use_container_width=True, column_config=column_config)
+            if st.session_state.get("error_log"):
+                st.subheader("Error Log")
+                for line in st.session_state.error_log:
+                    st.text(line)
 
-    show_buy_form()
-    show_sell_form()
+    with guide_tab:
+        st.header("User Guide")
+        st.markdown(
+            """
+            ### Getting Started
+            1. **Set a starting cash balance.** When you first open the app the dashboard
+               will ask for an initial amount of cash to trade with.
+            2. **Maintain a watchlist.** Use the sidebar lookup to search for tickers and
+               add them to your personal watchlist.
 
-    # ------------------------------------------------------------------
-    # Section 3: Daily Summary
-    # ------------------------------------------------------------------
-    st.subheader("Daily Summary")
-    if st.button("Generate Daily Summary"):
-        if not summary_df.empty:
-            summary_md = build_daily_summary(summary_df)
-            # Present the markdown in a code block so users can copy/paste
-            # directly into an LLM chat window.
-            st.code(summary_md, language="markdown")
-        else:
-            st.info("No summary available.")
+            ### Buying Stocks
+            1. Open the *Log a Buy* form.
+            2. Enter the ticker symbol, number of shares, and the price you paid.
+            3. Provide a **Stop Loss %**. For example, entering `10` will set a stop price
+               10% below your purchase price. The app stores the calculated price for you.
 
-    # ------------------------------------------------------------------
-    # Section 4: Downloads and Error Log
-    # ------------------------------------------------------------------
-    if not st.session_state.portfolio.empty:
-        csv = st.session_state.portfolio.to_csv(index=False).encode("utf-8")
-        st.download_button("Download Portfolio", csv, "portfolio_snapshot.csv", "text/csv")
-    if TRADE_LOG_CSV.exists():
-        tl = pd.read_csv(TRADE_LOG_CSV)
-        csv = tl.to_csv(index=False).encode("utf-8")
-        st.download_button("Download Trade Log", csv, "trade_log.csv", "text/csv")
+            ### Selling Stocks
+            - Once you hold a position it will appear in the *Current Portfolio* table.
+              Use the *Log a Sell* form to close or trim a position.
 
-    if st.session_state.get("error_log"):
-        st.subheader("Error Log")
-        for line in st.session_state.error_log:
-            st.text(line)
+            ### Current Portfolio Table
+            - Shows each holding with buy price, current price, stop loss and
+              unrealised profit or loss. Refresh prices manually or enable
+              auto-refresh for updates every 30 minutes.
+
+            ### Daily Summary
+            - Use the *Generate Daily Summary* button to create a markdown snapshot of
+              your portfolio and watchlist for easy sharing or journaling.
+
+            ### Tips
+            - Add extra funds at any time using the *Add Cash* button.
+            - Stop losses are stored as dollar prices even though you input a
+              percentage.
+            - The app saves data to the local `data/` folder so you can pick up where
+              you left off.
+            """
+        )
 
 
 if __name__ == "__main__":
