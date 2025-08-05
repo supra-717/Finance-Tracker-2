@@ -313,25 +313,14 @@ def show_buy_form() -> None:
     """Render and process the buy form."""
 
     st.subheader("Log a Buy")
-    with st.form("buy_form"):
-        b_ticker = st.text_input("Ticker", key="b_ticker")
-        b_shares = st.number_input(
-            "Shares", min_value=0.0, step=1.0, key="b_shares"
-        )
-        b_price = st.number_input(
-            "Price", min_value=0.0, format="%.2f", key="b_price"
-        )
-        b_stop = st.number_input(
-            "Stop-loss", min_value=0.0, format="%.2f", key="b_stop"
-        )
-        b_submit = st.form_submit_button("Submit Buy")
+    def submit_buy() -> None:
+        """Handle Buy submission and reset the form via callback."""
 
-    if b_submit:
         ok, msg, port, cash = manual_buy(
-            b_ticker,
-            b_shares,
-            b_price,
-            b_stop,
+            st.session_state.b_ticker,
+            st.session_state.b_shares,
+            st.session_state.b_price,
+            st.session_state.b_stop,
             st.session_state.portfolio,
             st.session_state.cash,
         )
@@ -339,35 +328,36 @@ def show_buy_form() -> None:
             st.session_state.portfolio = port
             st.session_state.cash = cash
             st.session_state.feedback = ("success", msg)
-            # Clear form values
-            st.session_state.b_ticker = ""
-            st.session_state.b_shares = 0.0
-            st.session_state.b_price = 0.0
-            st.session_state.b_stop = 0.0
+            # Remove widget state keys so ``init_session_state``
+            # reinitialises them on the next rerun.  This clears the
+            # form fields without setting values for widgets that are
+            # currently in use, avoiding StreamlitAPIException.
+            for key in ("b_ticker", "b_shares", "b_price", "b_stop"):
+                st.session_state.pop(key, None)
         else:
             st.session_state.feedback = ("error", msg)
-        st.rerun()
+
+    with st.form("buy_form"):
+        st.text_input("Ticker", key="b_ticker")
+        st.number_input("Shares", min_value=0.0, step=1.0, key="b_shares")
+        st.number_input("Price", min_value=0.0, format="%.2f", key="b_price")
+        st.number_input("Stop-loss", min_value=0.0, format="%.2f", key="b_stop")
+        # Use ``on_click`` callback so state mutations occur in the
+        # callback rather than in-line after widget definition.
+        st.form_submit_button("Submit Buy", on_click=submit_buy)
 
 
 def show_sell_form() -> None:
     """Render and process the sell form."""
 
     st.subheader("Log a Sell")
-    with st.form("sell_form"):
-        s_ticker = st.text_input("Ticker", key="s_ticker")
-        s_shares = st.number_input(
-            "Shares", min_value=0.0, step=1.0, key="s_shares"
-        )
-        s_price = st.number_input(
-            "Price", min_value=0.0, format="%.2f", key="s_price"
-        )
-        s_submit = st.form_submit_button("Submit Sell")
+    def submit_sell() -> None:
+        """Handle Sell submission and reset the form via callback."""
 
-    if s_submit:
         ok, msg, port, cash = manual_sell(
-            s_ticker,
-            s_shares,
-            s_price,
+            st.session_state.s_ticker,
+            st.session_state.s_shares,
+            st.session_state.s_price,
             st.session_state.portfolio,
             st.session_state.cash,
         )
@@ -375,13 +365,18 @@ def show_sell_form() -> None:
             st.session_state.portfolio = port
             st.session_state.cash = cash
             st.session_state.feedback = ("success", msg)
-            # Clear form values
-            st.session_state.s_ticker = ""
-            st.session_state.s_shares = 0.0
-            st.session_state.s_price = 0.0
+            # Remove widget state keys for a clean form next run.
+            for key in ("s_ticker", "s_shares", "s_price"):
+                st.session_state.pop(key, None)
         else:
             st.session_state.feedback = ("error", msg)
-        st.rerun()
+
+    with st.form("sell_form"):
+        st.text_input("Ticker", key="s_ticker")
+        st.number_input("Shares", min_value=0.0, step=1.0, key="s_shares")
+        st.number_input("Price", min_value=0.0, format="%.2f", key="s_price")
+        # Trigger callback to perform sell and clear state safely.
+        st.form_submit_button("Submit Sell", on_click=submit_sell)
 
 
 def main() -> None:
