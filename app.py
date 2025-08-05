@@ -15,6 +15,9 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
+# Set global page title for consistency across the app.
+st.set_page_config(page_title="AI Assisted Trading")
+
 # ---------------------------------------------------------------------------
 # File locations
 # ---------------------------------------------------------------------------
@@ -56,6 +59,16 @@ def save_watchlist(tickers: list[str]) -> None:
         # Persistence failures shouldn't crash the app; users can still rely on
         # session state within the current run.
         pass
+
+
+def fetch_price(ticker: str) -> float | None:
+    """Return the latest close price for ``ticker`` or ``None`` on failure."""
+
+    try:
+        data = yf.download(ticker, period="1d", progress=False)
+        return float(data["Close"].iloc[-1]) if not data.empty else None
+    except Exception:  # pragma: no cover - network errors
+        return None
 
 def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
     """Return the latest portfolio and cash balance.
@@ -330,6 +343,8 @@ def init_session_state() -> None:
         "s_price": 0.0,
         "ac_amount": 0.0,
         "lookup_symbol": "",
+        # Holds error text for symbol lookup so it can be cleared on success.
+        "lookup_error": "",
         "watchlist": [],
         # Cache of latest watchlist prices fetched via the refresh button.
         "watchlist_prices": {},
@@ -374,15 +389,18 @@ def show_watchlist_sidebar() -> None:
         )
 
     # Lookup form for a single ticker symbol.
+    # Slot to show a lookup error message if the symbol fails to resolve.
+    error_slot = sidebar.empty()
     symbol = sidebar.text_input("Symbol", key="lookup_symbol", placeholder="e.g. AAPL")
     if symbol:
         sym = symbol.upper()
-        try:
+        price = fetch_price(sym)
+        if price is None:
+            st.session_state.lookup_error = "Ticker not found."
+        else:
+            # Clear any previous errors on successful lookup.
+            st.session_state.lookup_error = ""
             ticker_obj = yf.Ticker(sym)
-            hist = ticker_obj.history(period="1d")
-            if hist.empty:
-                raise ValueError
-            price = float(hist["Close"].iloc[-1])
             name = ticker_obj.info.get("shortName") or ticker_obj.info.get("longName") or sym
             sidebar.write(f"{name}: ${price:.2f}")
             if sidebar.button("Add to Watchlist", key="add_watchlist"):
@@ -395,45 +413,37 @@ def show_watchlist_sidebar() -> None:
                     st.session_state.watchlist_prices[sym] = price
                     save_watchlist(st.session_state.watchlist)
                     st.session_state.feedback = ("success", f"{sym} added to watchlist.")
-                # Clear the lookup field after any attempt so the user can
-                # quickly search for another symbol and the sidebar refreshes.
+                # Clear field and any error so the next lookup starts fresh.
                 st.session_state.lookup_symbol = ""
+                st.session_state.lookup_error = ""
                 st.rerun()
-        except Exception:
-            sidebar.error("Ticker not found.")
+    else:
+        # No symbol entered: clear any stale errors.
+        st.session_state.lookup_error = ""
+
+    if st.session_state.lookup_error:
+        error_slot.error(st.session_state.lookup_error)
 
     if st.session_state.watchlist:
-        sidebar.subheader("Watchlist")
-
-        # Manual refresh to update all stored prices.
-        if sidebar.button("Refresh Prices", key="refresh_watchlist"):
+        # Header with refresh icon to update all prices.
+        header = sidebar.container()
+        hcol1, hcol2 = header.columns([4, 1])
+        hcol1.subheader("Watchlist")
+        if hcol2.button("\uD83D\uDD04", key="refresh_watchlist", help="Refresh prices"):
             updated: dict[str, float | None] = {}
             for t in st.session_state.watchlist:
-                try:
-                    data = yf.download(t, period="1d", progress=False)
-                    price = float(data["Close"].iloc[-1]) if not data.empty else None
-                except Exception:
-                    price = None
-                updated[t] = price
+                updated[t] = fetch_price(t)
             st.session_state.watchlist_prices.update(updated)
 
-        # Styling so the remove button only appears on hover. Streamlit has no
-        # native hover callbacks, so a small CSS snippet is used as a
-        # lightweight workaround.
+        # CSS to render remove buttons as red circular Xs.
         sidebar.markdown(
             """
             <style>
             .watchlist-item {display:flex; justify-content:space-between; align-items:center;}
             .watchlist-item button {
-                visibility:hidden;
-                color:white;
-                background-color:red;
-                border:none;
-                border-radius:50%;
-                width:1.2em; height:1.2em;
-                padding:0; line-height:1.2em;
+                color:white; background-color:red; border:none; border-radius:50%;
+                width:1.2em; height:1.2em; padding:0; line-height:1.2em;
             }
-            .watchlist-item:hover button {visibility:visible;}
             </style>
             """,
             unsafe_allow_html=True,
@@ -444,10 +454,9 @@ def show_watchlist_sidebar() -> None:
             display_price = f"${price:.2f}" if price is not None else "N/A"
             item = sidebar.container()
             item.markdown("<div class='watchlist-item'>", unsafe_allow_html=True)
-            col1, col2 = item.columns([4,1])
+            col1, col2 = item.columns([4, 1])
             col1.write(f"{t}: {display_price}")
-            # Display red circle "X" with a tooltip for clarity when removing.
-            if col2.button("✖", key=f"rm_{t}", help=f"Remove {t}"):
+            if col2.button("✖", key=f"rm_{t}", help="Remove"):
                 st.session_state.watchlist.remove(t)
                 st.session_state.watchlist_prices.pop(t, None)
                 save_watchlist(st.session_state.watchlist)
@@ -481,6 +490,11 @@ def show_buy_form() -> None:
                 save_watchlist(st.session_state.watchlist)
                 msg += f" {ticker} removed from watchlist."
             st.session_state.feedback = ("success", msg)
+            # Reset form fields on success so the form appears empty.
+            st.session_state.b_ticker = ""
+            st.session_state.b_shares = 0.0
+            st.session_state.b_price = 0.0
+            st.session_state.b_stop = 0.0
         else:
             st.session_state.feedback = ("error", msg)
 
@@ -512,6 +526,10 @@ def show_sell_form() -> None:
             st.session_state.portfolio = port
             st.session_state.cash = cash
             st.session_state.feedback = ("success", msg)
+            # Clear form inputs on success.
+            st.session_state.s_ticker = ""
+            st.session_state.s_shares = 0.0
+            st.session_state.s_price = 0.0
         else:
             st.session_state.feedback = ("error", msg)
 
@@ -522,6 +540,69 @@ def show_sell_form() -> None:
             st.number_input("Price", min_value=0.0, format="%.2f", key="s_price")
             # Trigger callback to perform sell and clear state safely.
             st.form_submit_button("Submit Sell", on_click=submit_sell)
+
+
+def build_daily_summary(summary_df: pd.DataFrame) -> str:
+    """Return a markdown summary of the portfolio and watchlist."""
+
+    totals = summary_df[summary_df["Ticker"] == "TOTAL"].iloc[0]
+    holdings = summary_df[summary_df["Ticker"] != "TOTAL"].copy()
+    holdings = holdings[
+        ["Ticker", "Shares", "Cost Basis", "Current Price", "Stop Loss", "Total Value", "PnL"]
+    ].rename(
+        columns={
+            "Cost Basis": "Buy Price",
+            "Stop Loss": "Stop-Loss",
+            "Total Value": "Value",
+        }
+    )
+    for col in ["Buy Price", "Current Price", "Stop-Loss", "Value", "PnL"]:
+        holdings[col] = pd.to_numeric(holdings[col], errors="coerce").round(2)
+    holdings_md = holdings.to_markdown(index=False) if not holdings.empty else "None"
+
+    gainer = loser = "None"
+    if not holdings.empty:
+        gain_row = holdings.loc[holdings["PnL"].idxmax()]
+        if gain_row["PnL"] > 0:
+            gainer = f"{gain_row['Ticker']} (${gain_row['PnL']:.2f})"
+        lose_row = holdings.loc[holdings["PnL"].idxmin()]
+        if lose_row["PnL"] < 0:
+            loser = f"{lose_row['Ticker']} (${lose_row['PnL']:.2f})"
+
+    watch_rows = []
+    for t in st.session_state.watchlist:
+        price = st.session_state.watchlist_prices.get(t)
+        if price is None:
+            price = fetch_price(t)
+            st.session_state.watchlist_prices[t] = price
+        price_str = f"${price:.2f}" if price is not None else "N/A"
+        watch_rows.append((t, price_str))
+    watch_md = (
+        "|Ticker|Price|\n|---|---|\n" + "\n".join(f"|{t}|{p}|" for t, p in watch_rows)
+        if watch_rows
+        else "None"
+    )
+
+    prompt = (
+        "Reevaluate your portfolio. Research the current market and decide if you would "
+        "like to add or drop any stocks or adjust. Remember, you have complete control "
+        "over your portfolio. Only trade micro-caps."
+    )
+
+    summary_md = (
+        f"## Daily Portfolio Summary - {TODAY}\n\n"
+        f"**Cash balance:** ${totals['Cash Balance']:.2f}\n\n"
+        "### Holdings\n"
+        f"{holdings_md}\n\n"
+        f"**Total equity:** ${totals['Total Equity']:.2f}\n\n"
+        f"**Largest gainer:** {gainer}\n"
+        f"**Largest loser:** {loser}\n\n"
+        "### Watchlist\n"
+        f"{watch_md}\n\n"
+        f"{prompt}"
+    )
+
+    return summary_md
 
 
 def show_cash_section() -> None:
@@ -686,15 +767,10 @@ def main() -> None:
     st.subheader("Daily Summary")
     if st.button("Generate Daily Summary"):
         if not summary_df.empty:
-            totals = summary_df[summary_df["Ticker"] == "TOTAL"].iloc[0]
-            summary_md = (
-                "### Today's totals:\n"
-                f"- Total stock value: ${totals['Total Value']}\n"
-                f"- Total PnL: ${totals['PnL']}\n"
-                f"- Cash balance: ${totals['Cash Balance']}\n"
-                f"- Total equity: ${totals['Total Equity']}\n"
-            )
-            st.markdown(summary_md)
+            summary_md = build_daily_summary(summary_df)
+            # Present the markdown in a code block so users can copy/paste
+            # directly into an LLM chat window.
+            st.code(summary_md, language="markdown")
         else:
             st.info("No summary available.")
 
