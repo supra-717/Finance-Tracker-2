@@ -731,40 +731,162 @@ def main() -> None:
     # Section 2: Current Portfolio Table
     # ------------------------------------------------------------------
     st.subheader("Current Portfolio")
+
+    # ------------------------------------------------------------------
+    # Refresh controls
+    # ------------------------------------------------------------------
+    auto_refresh = st.checkbox("Auto-refresh every 30 min", key="auto_refresh")
+    if auto_refresh:
+        try:  # pragma: no cover - optional dependency
+            from streamlit_autorefresh import st_autorefresh
+
+            st_autorefresh(interval=30 * 60 * 1000, key="portfolio_refresh")
+        except Exception:  # pragma: no cover - import-time failure
+            st.warning("Install streamlit-autorefresh for auto refresh support.")
+
+    if st.button("Refresh"):
+        st.experimental_rerun()
+
+    filter_text = st.text_input("Filter by ticker symbol")
+
     port_table = summary_df[summary_df["Ticker"] != "TOTAL"].copy()
+    if filter_text:
+        port_table = port_table[port_table["Ticker"].str.contains(filter_text, case=False)]
+
+    st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
     if port_table.empty:
         st.info("Your portfolio is empty. Log a trade below.")
     else:
         # Ensure numeric types for calculations and handle invalid data.
-        port_table["Current Price"] = pd.to_numeric(
-            port_table["Current Price"], errors="coerce"
-        )
-        port_table["Cost Basis"] = pd.to_numeric(
-            port_table["Cost Basis"], errors="coerce"
-        )
+        numeric_cols = [
+            "Shares",
+            "Cost Basis",
+            "Current Price",
+            "Stop Loss",
+            "Total Value",
+            "PnL",
+        ]
+        for col in numeric_cols:
+            port_table[col] = pd.to_numeric(port_table[col], errors="coerce")
+
         port_table["Pct Change"] = (
-            (port_table["Current Price"] - port_table["Cost Basis"]) / port_table["Cost Basis"]
-        ) * 100
-        port_table["Pct Change"] = pd.to_numeric(
-            port_table["Pct Change"], errors="coerce"
+            (port_table["Current Price"] - port_table["Cost Basis"])
+            / port_table["Cost Basis"]
+            * 100
         )
         invalid = port_table["Pct Change"].isna()
         if invalid.any():
             missing = ", ".join(port_table.loc[invalid, "Ticker"].astype(str))
             st.warning(f"Unable to compute Pct Change for: {missing}")
-        port_table["Pct Change"] = port_table["Pct Change"].round(2)
+
+        # Rename and reorder columns for display
+        port_table = port_table.rename(
+            columns={"Cost Basis": "Buy Price", "Total Value": "Value"}
+        )
+        port_table = port_table[
+            [
+                "Ticker",
+                "Shares",
+                "Buy Price",
+                "Current Price",
+                "Pct Change",
+                "Stop Loss",
+                "Value",
+                "PnL",
+                "Action",
+            ]
+        ]
+
+        def fmt_currency(x: float) -> str:
+            return f"${x:,.2f}"
+
+        def fmt_percent(x: float) -> str:
+            sign = "+" if x > 0 else ""
+            arrow = "↑" if x > 0 else ("↓" if x < 0 else "")
+            return f"{sign}{x:.1f}% {arrow}".strip()
+
+        def fmt_shares(x: float) -> str:
+            return f"{int(x):,}"
 
         def highlight_pct(val: float) -> str:
-            """Colour cells when price moved more than ±5%."""
-
             if val > 5:
                 return "background-color: #d4ffd4"  # light green
             if val < -5:
                 return "background-color: #ffd4d4"  # light red
             return ""
 
-        st.dataframe(port_table.style.applymap(highlight_pct, subset=["Pct Change"]))
-        st.caption(f"Last updated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        def color_pnl(val: float) -> str:
+            if val > 0:
+                return "color: green"
+            if val < 0:
+                return "color: red"
+            return ""
+
+        def highlight_stop(row: pd.Series) -> list[str]:
+            price = row["Current Price"]
+            stop = row["Stop Loss"]
+            if pd.notna(price) and pd.notna(stop) and stop > 0:
+                if abs(price - stop) / stop <= 0.05:
+                    return ["background-color: #ffe8cc"]
+            return [""]
+
+        numeric_display = [
+            "Shares",
+            "Buy Price",
+            "Current Price",
+            "Pct Change",
+            "Stop Loss",
+            "Value",
+            "PnL",
+        ]
+
+        styled = (
+            port_table.style.format(
+                {
+                    "Shares": fmt_shares,
+                    "Buy Price": fmt_currency,
+                    "Current Price": fmt_currency,
+                    "Stop Loss": fmt_currency,
+                    "Value": fmt_currency,
+                    "PnL": fmt_currency,
+                    "Pct Change": fmt_percent,
+                }
+            )
+            .set_properties(subset=numeric_display, **{"text-align": "right"})
+            .applymap(highlight_pct, subset=["Pct Change"])
+            .applymap(color_pnl, subset=["PnL"])
+            .apply(highlight_stop, subset=["Stop Loss"], axis=1)
+            .set_table_styles(
+                [
+                    {
+                        "selector": "th",
+                        "props": [("font-size", "16px"), ("text-align", "center")],
+                    },
+                    {
+                        "selector": "td",
+                        "props": [("font-size", "16px"), ("color", "black")],
+                    },
+                ]
+            )
+        )
+
+        column_config = {
+            "Stop Loss": st.column_config.NumberColumn(
+                "Stop Loss", help="Price at which the stock will be sold to limit loss"
+            ),
+            "Pct Change": st.column_config.NumberColumn(
+                "Pct Change", help="Percentage change since purchase"
+            ),
+            "PnL": st.column_config.NumberColumn("PnL", help="Profit or loss"),
+            "Value": st.column_config.NumberColumn(
+                "Value", help="Current market value"
+            ),
+            "Buy Price": st.column_config.NumberColumn(
+                "Buy Price", help="Average price paid per share"
+            ),
+        }
+        st.dataframe(styled, use_container_width=True, column_config=column_config)
 
     show_buy_form()
     show_sell_form()
