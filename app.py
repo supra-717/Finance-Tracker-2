@@ -301,6 +301,10 @@ def init_session_state() -> None:
         "s_price": 0.0,
         "ac_amount": 0.0,
         "watchlist": [],
+        # Cache of latest watchlist prices fetched via the refresh button.
+        "watchlist_prices": {},
+        # Toggle for showing the inline "Add Cash" form.
+        "show_cash_form": False,
     }.items():
         st.session_state.setdefault(key, default)
 
@@ -326,6 +330,9 @@ def show_watchlist_sidebar() -> None:
     removed = [t for t in st.session_state.watchlist if t in portfolio_tickers]
     if removed:
         st.session_state.watchlist = [t for t in st.session_state.watchlist if t not in removed]
+        # Drop any cached prices for tickers that moved into the portfolio.
+        for t in removed:
+            st.session_state.watchlist_prices.pop(t, None)
         st.session_state.feedback = (
             "info",
             f"Removed {', '.join(removed)} from watchlist (now in portfolio).",
@@ -350,23 +357,61 @@ def show_watchlist_sidebar() -> None:
                     st.session_state.feedback = ("info", f"{sym} already in portfolio.")
                 else:
                     st.session_state.watchlist.append(sym)
+                    st.session_state.watchlist_prices[sym] = price
                     st.session_state.feedback = ("success", f"{sym} added to watchlist.")
         except Exception:
             sidebar.error("Ticker not found.")
 
-    # Display the watchlist with latest prices on every run.
     if st.session_state.watchlist:
         sidebar.subheader("Watchlist")
-        for t in st.session_state.watchlist:
-            try:
-                data = yf.download(t, period="1d", progress=False)
-                price = float(data["Close"].iloc[-1]) if not data.empty else None
-            except Exception:
-                price = None
-            if price is not None:
-                sidebar.write(f"{t}: ${price:.2f}")
-            else:
-                sidebar.write(f"{t}: N/A")
+
+        # Manual refresh to update all stored prices.
+        if sidebar.button("Refresh Prices", key="refresh_watchlist"):
+            updated: dict[str, float | None] = {}
+            for t in st.session_state.watchlist:
+                try:
+                    data = yf.download(t, period="1d", progress=False)
+                    price = float(data["Close"].iloc[-1]) if not data.empty else None
+                except Exception:
+                    price = None
+                updated[t] = price
+            st.session_state.watchlist_prices.update(updated)
+
+        # Styling so the remove button only appears on hover. Streamlit has no
+        # native hover callbacks, so a small CSS snippet is used as a
+        # lightweight workaround.
+        sidebar.markdown(
+            """
+            <style>
+            .watchlist-item {display:flex; justify-content:space-between; align-items:center;}
+            .watchlist-item button {
+                visibility:hidden;
+                color:white;
+                background-color:red;
+                border:none;
+                border-radius:50%;
+                width:1.2em; height:1.2em;
+                padding:0; line-height:1.2em;
+            }
+            .watchlist-item:hover button {visibility:visible;}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        for t in st.session_state.watchlist.copy():
+            price = st.session_state.watchlist_prices.get(t)
+            display_price = f"${price:.2f}" if price is not None else "N/A"
+            item = sidebar.container()
+            item.markdown("<div class='watchlist-item'>", unsafe_allow_html=True)
+            col1, col2 = item.columns([4,1])
+            col1.write(f"{t}: {display_price}")
+            if col2.button("✖", key=f"rm_{t}"):
+                st.session_state.watchlist.remove(t)
+                st.session_state.watchlist_prices.pop(t, None)
+                st.session_state.feedback = ("info", f"{t} removed from watchlist.")
+                st.rerun()
+            item.markdown("</div>", unsafe_allow_html=True)
 
 
 def show_buy_form() -> None:
@@ -390,6 +435,7 @@ def show_buy_form() -> None:
             # Remove from watchlist if the ticker was previously being watched.
             if ticker in st.session_state.watchlist:
                 st.session_state.watchlist.remove(ticker)
+                st.session_state.watchlist_prices.pop(ticker, None)
                 msg += f" {ticker} removed from watchlist."
             st.session_state.feedback = ("success", msg)
         else:
@@ -435,11 +481,11 @@ def show_sell_form() -> None:
             st.form_submit_button("Submit Sell", on_click=submit_sell)
 
 
-def show_add_cash_form() -> None:
-    """Render a form that lets the user add cash to the account."""
+def show_cash_section() -> None:
+    """Display cash balance with an inline form to add funds."""
 
     def submit_cash() -> None:
-        """Update cash balance and persist the change."""
+        """Update cash balance, persist change, then hide the form."""
 
         amount = st.session_state.ac_amount
         if amount <= 0:
@@ -455,17 +501,32 @@ def show_add_cash_form() -> None:
             "success",
             f"Added ${amount:.2f} to cash balance.",
         )
+        # Hide the form again after successful submission.
+        st.session_state.show_cash_form = False
 
-    # Display inside an expander so the UI mirrors the buy/sell forms.
-    with st.expander("Add Cash"):
-        with st.form("add_cash_form", clear_on_submit=True):
-            st.number_input(
-                "Amount",
-                min_value=0.0,
-                format="%.2f",
-                key="ac_amount",
+    st.subheader("Cash Balance")
+    col1, col2 = st.columns([3, 1])
+
+    # Display the cash amount without a redundant label.
+    with col1:
+        st.markdown(f"<h3>${st.session_state.cash:.2f}</h3>", unsafe_allow_html=True)
+
+    with col2:
+        if st.session_state.show_cash_form:
+            # Inline form shown when the button is clicked.
+            with st.form("add_cash_form", clear_on_submit=True):
+                st.number_input(
+                    "Amount",
+                    min_value=0.0,
+                    format="%.2f",
+                    key="ac_amount",
+                )
+                st.form_submit_button("Add Cash", on_click=submit_cash)
+        else:
+            st.button(
+                "Add Cash",
+                on_click=lambda: st.session_state.update(show_cash_form=True),
             )
-            st.form_submit_button("Add Cash", on_click=submit_cash)
 
 
 def main() -> None:
@@ -528,9 +589,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Section 1: Cash Balance & Add Cash
     # ------------------------------------------------------------------
-    st.subheader("Cash Balance")
-    st.metric("Cash", f"${st.session_state.cash:.2f}")
-    show_add_cash_form()
+    show_cash_section()
 
     # ------------------------------------------------------------------
     # Section 2: Current Portfolio Table
@@ -540,9 +599,23 @@ def main() -> None:
     if port_table.empty:
         st.info("Your portfolio is empty. Log a trade below.")
     else:
+        # Ensure numeric types for calculations and handle invalid data.
+        port_table["Current Price"] = pd.to_numeric(
+            port_table["Current Price"], errors="coerce"
+        )
+        port_table["Cost Basis"] = pd.to_numeric(
+            port_table["Cost Basis"], errors="coerce"
+        )
         port_table["Pct Change"] = (
             (port_table["Current Price"] - port_table["Cost Basis"]) / port_table["Cost Basis"]
         ) * 100
+        port_table["Pct Change"] = pd.to_numeric(
+            port_table["Pct Change"], errors="coerce"
+        )
+        invalid = port_table["Pct Change"].isna()
+        if invalid.any():
+            missing = ", ".join(port_table.loc[invalid, "Ticker"].astype(str))
+            st.warning(f"Unable to compute Pct Change for: {missing}")
         port_table["Pct Change"] = port_table["Pct Change"].round(2)
 
         def highlight_pct(val: float) -> str:
