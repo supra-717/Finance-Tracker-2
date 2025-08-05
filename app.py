@@ -265,7 +265,7 @@ if st.session_state.get("needs_cash", False):
         # Persist the cash value to CSV
         save_portfolio_snapshot(st.session_state.portfolio, st.session_state.cash)
         st.success(f"Starting cash of ${start_cash:.2f} recorded.")
-        st.experimental_rerun()
+        st.rerun()
 else:
     # Always refresh today's snapshot and totals once cash is initialized
     summary_df = save_portfolio_snapshot(st.session_state.portfolio, st.session_state.cash)
@@ -292,7 +292,7 @@ else:
             st.session_state.portfolio = port
             st.session_state.cash = cash
             st.success(msg)
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error(msg)
 
@@ -310,7 +310,7 @@ else:
             st.session_state.portfolio = port
             st.session_state.cash = cash
             st.success(msg)
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error(msg)
 
