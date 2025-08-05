@@ -376,6 +376,9 @@ def init_session_state() -> None:
         "watchlist_prices": {},
         # Toggle for showing the inline "Add Cash" form.
         "show_cash_form": False,
+        # Daily summary text and visibility toggle.
+        "daily_summary": "",
+        "summary_visible": False,
     }.items():
         st.session_state.setdefault(key, default)
 
@@ -725,8 +728,28 @@ def show_cash_section() -> None:
 def main() -> None:
     """Entry point for the Streamlit UI."""
 
-    st.title("AI Assisted Trading")
     init_session_state()
+
+    header_cols = st.columns([4, 1, 1])
+    header_cols[0].title("AI Assisted Trading")
+    if not st.session_state.portfolio.empty:
+        csv = st.session_state.portfolio.to_csv(index=False).encode("utf-8")
+        header_cols[1].download_button(
+            "Download Portfolio", csv, "portfolio_snapshot.csv", "text/csv"
+        )
+    else:
+        header_cols[1].empty()
+    if TRADE_LOG_CSV.exists():
+        tl_df = pd.read_csv(TRADE_LOG_CSV)
+        if not tl_df.empty:
+            tl_csv = tl_df.to_csv(index=False).encode("utf-8")
+            header_cols[2].download_button(
+                "Download Trade Log", tl_csv, "trade_log.csv", "text/csv"
+            )
+        else:
+            header_cols[2].empty()
+    else:
+        header_cols[2].empty()
 
     dashboard_tab, guide_tab = st.tabs(["Dashboard", "User Guide"])
 
@@ -798,15 +821,17 @@ def main() -> None:
             # --------------------------------------------------------------
             # Section 2: Current Portfolio Table
             # --------------------------------------------------------------
-            st.subheader("Current Portfolio")
             port_table = summary_df[summary_df["Ticker"] != "TOTAL"].copy()
+            header_cols = st.columns([5, 2])
+            header_cols[0].subheader("Current Portfolio")
             if port_table.empty:
+                header_cols[1].empty()
                 st.info(
                     "Your portfolio is empty. Use the Buy form below to add your first position."
                 )
             else:
-                auto_refresh = st.checkbox(
-                    "Auto-refresh every 30 min", key="auto_refresh"
+                auto_refresh = header_cols[1].checkbox(
+                    "Auto Refresh", key="auto_refresh", help="Refresh every 30 min"
                 )
                 if auto_refresh:
                     try:  # pragma: no cover - optional dependency
@@ -818,12 +843,14 @@ def main() -> None:
                             "Install streamlit-autorefresh for auto refresh support."
                         )
 
-                if st.button("Refresh"):
-                    st.experimental_rerun()
-
-                st.caption(
+                update_cols = st.columns([8, 1])
+                update_cols[0].caption(
                     f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                 )
+                if update_cols[1].button(
+                    "🔄", key="refresh_portfolio", help="Refresh prices"
+                ):
+                    st.rerun()
 
                 # Ensure numeric types for calculations and handle invalid data.
                 numeric_cols = [
@@ -1012,28 +1039,21 @@ def main() -> None:
             st.subheader("Daily Summary")
             if st.button("Generate Daily Summary"):
                 if not summary_df.empty:
-                    summary_md = build_daily_summary(summary_df)
-                    # Present the markdown in a code block so users can copy/paste
-                    # directly into an LLM chat window.
-                    st.code(summary_md, language="markdown")
+                    st.session_state.daily_summary = build_daily_summary(summary_df)
+                    st.session_state.summary_visible = True
                 else:
                     st.info("No summary available.")
+            if (
+                st.session_state.get("summary_visible")
+                and st.session_state.get("daily_summary")
+            ):
+                st.code(st.session_state.daily_summary, language="markdown")
+                if st.button("Dismiss Summary", key="dismiss_summary"):
+                    st.session_state.summary_visible = False
 
             # --------------------------------------------------------------
-            # Section 4: Downloads and Error Log
+            # Section 4: Error Log
             # --------------------------------------------------------------
-            if not st.session_state.portfolio.empty:
-                csv = st.session_state.portfolio.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    "Download Portfolio", csv, "portfolio_snapshot.csv", "text/csv"
-                )
-            if TRADE_LOG_CSV.exists():
-                tl = pd.read_csv(TRADE_LOG_CSV)
-                csv = tl.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    "Download Trade Log", csv, "trade_log.csv", "text/csv"
-                )
-
             if st.session_state.get("error_log"):
                 st.subheader("Error Log")
                 for line in st.session_state.error_log:
