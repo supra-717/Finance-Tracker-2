@@ -86,3 +86,24 @@ One final shameless plug: (https://substack.com/@nathanbsmith?utm_source=edit-pr
 
 Find a mistake in the logs or have advice?
 Please Reach out here: nathanbsmith.business@gmail.com
+
+## Streamlit Dashboard
+
+This repository now ships with a lightweight Streamlit dashboard for managing
+the experimental portfolio locally.
+
+### Installation
+
+```
+pip install -r requirements.txt
+```
+
+### Running the App
+
+```
+streamlit run app.py
+```
+
+The application stores data in the `data/` directory so it survives across
+restarts.  If you encounter issues, ensure this folder is writable and that the
+CSV files are not open in another program.

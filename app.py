@@ -15,20 +15,35 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-# Set global page title for consistency across the app.
-st.set_page_config(page_title="AI Assisted Trading")
+from portfolio import PORTFOLIO_COLUMNS, ensure_schema
 
 # ---------------------------------------------------------------------------
-# File locations
+# Configuration & constants
 # ---------------------------------------------------------------------------
-DATA_DIR = Path(__file__).resolve().parent / "Scripts and CSV Files"
+st.set_page_config(page_title="AI Assisted Trading")
+
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(exist_ok=True)
+
+# Centralised file locations
 PORTFOLIO_CSV = DATA_DIR / "chatgpt_portfolio_update.csv"
 TRADE_LOG_CSV = DATA_DIR / "chatgpt_trade_log.csv"
-# File used to persist the sidebar watchlist between runs.
-WATCHLIST_FILE = Path(__file__).resolve().parent / "watchlist.json"
+WATCHLIST_FILE = DATA_DIR / "watchlist.json"
+
+# Column keys for easy reference in the UI logic
+COL_TICKER, COL_SHARES, COL_STOP, COL_PRICE, COL_COST = PORTFOLIO_COLUMNS
 
 # Today's date used for all new logs.
 TODAY = datetime.today().strftime("%Y-%m-%d")
+
+
+def log_error(message: str) -> None:
+    """Append ``message`` to a session-scoped error log."""
+
+    st.session_state.setdefault("error_log", []).append(
+        f"{datetime.now():%H:%M:%S} - {message}"
+    )
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -61,13 +76,19 @@ def save_watchlist(tickers: list[str]) -> None:
         pass
 
 
+@st.cache_data(ttl=300)
 def fetch_price(ticker: str) -> float | None:
-    """Return the latest close price for ``ticker`` or ``None`` on failure."""
+    """Return the latest close price for ``ticker`` or ``None`` on failure.
 
-    try:
+    Results are cached for a short period to avoid excessive network calls
+    when the same ticker is requested repeatedly.
+    """
+
+    try:  # pragma: no cover - network errors
         data = yf.download(ticker, period="1d", progress=False)
         return float(data["Close"].iloc[-1]) if not data.empty else None
-    except Exception:  # pragma: no cover - network errors
+    except Exception:
+        log_error(f"Failed to fetch price for {ticker}")
         return None
 
 def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
@@ -78,9 +99,7 @@ def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
     starting amount.
     """
 
-    empty_portfolio = pd.DataFrame(
-        columns=["ticker", "shares", "stop_loss", "buy_price", "cost_basis"]
-    )
+    empty_portfolio = pd.DataFrame(columns=PORTFOLIO_COLUMNS)
 
     if not PORTFOLIO_CSV.exists():
         return empty_portfolio, 0.0, True
@@ -102,17 +121,15 @@ def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
         latest = non_total[non_total["Date"] == latest_date].copy()
         latest.rename(
             columns={
-                "Ticker": "ticker",
-                "Shares": "shares",
-                "Stop Loss": "stop_loss",
-                "Cost Basis": "buy_price",
+                "Ticker": COL_TICKER,
+                "Shares": COL_SHARES,
+                "Stop Loss": COL_STOP,
+                "Cost Basis": COL_PRICE,
             },
             inplace=True,
         )
-        latest["cost_basis"] = latest["shares"] * latest["buy_price"]
-        portfolio = latest[
-            ["ticker", "shares", "stop_loss", "buy_price", "cost_basis"]
-        ].reset_index(drop=True)
+        latest[COL_COST] = latest[COL_SHARES] * latest[COL_PRICE]
+        portfolio = ensure_schema(latest).reset_index(drop=True)
 
     total_rows = df[df["Ticker"] == "TOTAL"].copy()
     if total_rows.empty:
@@ -224,14 +241,17 @@ def manual_buy(
     try:
         day_high, day_low = get_day_high_low(ticker)
     except Exception as exc:  # pragma: no cover - network errors
+        log_error(str(exc))
         return False, str(exc), portfolio_df, cash
 
     if not (day_low <= price <= day_high):
         msg = f"Price outside today's range {day_low:.2f}-{day_high:.2f}"
+        log_error(msg)
         return False, msg, portfolio_df, cash
 
     cost = price * shares
     if cost > cash:
+        log_error("Insufficient cash for this trade.")
         return False, "Insufficient cash for this trade.", portfolio_df, cash
 
     log = {
@@ -283,25 +303,30 @@ def manual_sell(
     """Execute a manual sell and update portfolio and logs."""
 
     ticker = ticker.upper()
-    if ticker not in portfolio_df["ticker"].values:
-        return False, "Ticker not in portfolio.", portfolio_df, cash
+    if ticker not in portfolio_df[COL_TICKER].values:
+        msg = "Ticker not in portfolio."
+        log_error(msg)
+        return False, msg, portfolio_df, cash
 
     try:
         day_high, day_low = get_day_high_low(ticker)
     except Exception as exc:  # pragma: no cover - network errors
+        log_error(str(exc))
         return False, str(exc), portfolio_df, cash
 
     if not (day_low <= price <= day_high):
         msg = f"Price outside today's range {day_low:.2f}-{day_high:.2f}"
+        log_error(msg)
         return False, msg, portfolio_df, cash
 
-    row = portfolio_df[portfolio_df["ticker"] == ticker].iloc[0]
-    total_shares = float(row["shares"])
+    row = portfolio_df[portfolio_df[COL_TICKER] == ticker].iloc[0]
+    total_shares = float(row[COL_SHARES])
     if shares > total_shares:
         msg = f"Trying to sell {shares} shares but only own {total_shares}."
+        log_error(msg)
         return False, msg, portfolio_df, cash
 
-    buy_price = float(row["buy_price"])
+    buy_price = float(row[COL_PRICE])
     cost_basis = buy_price * shares
     pnl = price * shares - cost_basis
 
@@ -319,11 +344,11 @@ def manual_sell(
     append_trade_log(log)
 
     if shares == total_shares:
-        portfolio_df = portfolio_df[portfolio_df["ticker"] != ticker]
+        portfolio_df = portfolio_df[portfolio_df[COL_TICKER] != ticker]
     else:
-        idx = portfolio_df[portfolio_df["ticker"] == ticker].index[0]
-        portfolio_df.at[idx, "shares"] = total_shares - shares
-        portfolio_df.at[idx, "cost_basis"] = portfolio_df.at[idx, "shares"] * buy_price
+        idx = portfolio_df[portfolio_df[COL_TICKER] == ticker].index[0]
+        portfolio_df.at[idx, COL_SHARES] = total_shares - shares
+        portfolio_df.at[idx, COL_COST] = portfolio_df.at[idx, COL_SHARES] * buy_price
 
     cash += price * shares
     save_portfolio_snapshot(portfolio_df, cash)
@@ -338,6 +363,8 @@ def init_session_state() -> None:
         "b_shares": 0.0,
         "b_price": 0.0,
         "b_stop": 0.0,
+        "b_stop_mode": "None",
+        "b_stop_pct": 0.0,
         "s_ticker": "",
         "s_shares": 0.0,
         "s_price": 0.0,
@@ -362,6 +389,18 @@ def init_session_state() -> None:
     # Load a persisted watchlist from disk only on first run.
     if not st.session_state.watchlist and WATCHLIST_FILE.exists():
         st.session_state.watchlist = load_watchlist()
+
+
+def show_onboarding() -> None:
+    """Display a simple onboarding message for first-time users."""
+
+    if not st.session_state.get("dismissed_onboarding"):
+        st.info(
+            "Use the controls below to manage your portfolio. "
+            "Data is stored in the local `data/` directory."
+        )
+        if st.button("Dismiss", key="dismiss_onboard"):
+            st.session_state.dismissed_onboarding = True
 
 
 def show_watchlist_sidebar() -> None:
@@ -508,10 +547,29 @@ def show_buy_form() -> None:
 
     with st.expander("Log a Buy"):
         with st.form("buy_form", clear_on_submit=True):
-            st.text_input("Ticker", key="b_ticker")
+            ticker = st.text_input("Ticker", key="b_ticker")
             st.number_input("Shares", min_value=0.0, step=1.0, key="b_shares")
-            st.number_input("Price", min_value=0.0, format="%.2f", key="b_price")
-            st.number_input("Stop-loss", min_value=0.0, format="%.2f", key="b_stop")
+
+            latest = fetch_price(ticker) if ticker else 0.0
+            st.number_input(
+                "Price", min_value=0.0, format="%.2f", key="b_price", value=latest or 0.0
+            )
+
+            stop_mode = st.selectbox(
+                "Stop Loss Type", ["None", "Price", "% below price"], key="b_stop_mode"
+            )
+            if stop_mode == "Price":
+                st.number_input(
+                    "Stop-loss", min_value=0.0, format="%.2f", key="b_stop"
+                )
+            elif stop_mode == "% below price":
+                pct = st.number_input(
+                    "Stop-loss %", min_value=0.0, format="%.1f", key="b_stop_pct"
+                )
+                st.session_state.b_stop = st.session_state.b_price * (1 - pct / 100)
+            else:
+                st.session_state.b_stop = 0.0
+
             # Use ``on_click`` callback so state mutations occur in the
             # callback rather than in-line after widget definition.
             st.form_submit_button("Submit Buy", on_click=submit_buy)
@@ -671,6 +729,14 @@ def main() -> None:
     st.title("AI Assisted Trading")
     init_session_state()
     show_watchlist_sidebar()
+    show_onboarding()
+
+    theme = st.sidebar.radio("Theme", ["Light", "Dark"], key="theme")
+    if theme == "Dark":
+        st.write(
+            "<style>body { background-color: #0e1117; color: white; }</style>",
+            unsafe_allow_html=True,
+        )
 
     # Display feedback messages once and remove from session state so they
     # do not linger between reruns.
@@ -747,11 +813,7 @@ def main() -> None:
     if st.button("Refresh"):
         st.experimental_rerun()
 
-    filter_text = st.text_input("Filter by ticker symbol")
-
     port_table = summary_df[summary_df["Ticker"] != "TOTAL"].copy()
-    if filter_text:
-        port_table = port_table[port_table["Ticker"].str.contains(filter_text, case=False)]
 
     st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -801,10 +863,6 @@ def main() -> None:
                 "Action",
             ]
         ]
-
-        # Debugging: print current columns and head before styling
-        print(port_table.columns)
-        print(port_table.head())
 
         required_columns = [
             "Ticker",
@@ -935,6 +993,22 @@ def main() -> None:
             st.code(summary_md, language="markdown")
         else:
             st.info("No summary available.")
+
+    # ------------------------------------------------------------------
+    # Section 4: Downloads and Error Log
+    # ------------------------------------------------------------------
+    if not st.session_state.portfolio.empty:
+        csv = st.session_state.portfolio.to_csv(index=False).encode("utf-8")
+        st.download_button("Download Portfolio", csv, "portfolio_snapshot.csv", "text/csv")
+    if TRADE_LOG_CSV.exists():
+        tl = pd.read_csv(TRADE_LOG_CSV)
+        csv = tl.to_csv(index=False).encode("utf-8")
+        st.download_button("Download Trade Log", csv, "trade_log.csv", "text/csv")
+
+    if st.session_state.get("error_log"):
+        st.subheader("Error Log")
+        for line in st.session_state.error_log:
+            st.text(line)
 
 
 if __name__ == "__main__":
