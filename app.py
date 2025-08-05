@@ -18,15 +18,30 @@ TODAY = datetime.today().strftime("%Y-%m-%d")
 # Helper functions
 # -----------------------------------------------------------------------------
 
-def load_portfolio() -> tuple[pd.DataFrame, float]:
-    """Return latest portfolio and cash balance from ``PORTFOLIO_CSV``."""
-    if not PORTFOLIO_CSV.exists():
-        return pd.DataFrame(columns=["ticker", "shares", "stop_loss", "buy_price", "cost_basis"]), 0.0
+def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
+    """Return latest portfolio, cash balance and whether initialization is needed.
 
-    df = pd.read_csv(PORTFOLIO_CSV)
+    The boolean flag indicates if the CSV is missing, empty, or lacks a cash
+    balance (i.e. first-time use) so the UI can prompt for a starting amount.
+    """
+    empty_portfolio = pd.DataFrame(
+        columns=["ticker", "shares", "stop_loss", "buy_price", "cost_basis"]
+    )
+
+    if not PORTFOLIO_CSV.exists():
+        return empty_portfolio, 0.0, True
+
+    try:
+        df = pd.read_csv(PORTFOLIO_CSV)
+    except pd.errors.EmptyDataError:
+        return empty_portfolio, 0.0, True
+
+    if df.empty:
+        return empty_portfolio, 0.0, True
+
     non_total = df[df["Ticker"] != "TOTAL"].copy()
     if non_total.empty:
-        portfolio = pd.DataFrame(columns=["ticker", "shares", "stop_loss", "buy_price", "cost_basis"])
+        portfolio = empty_portfolio.copy()
     else:
         non_total["Date"] = pd.to_datetime(non_total["Date"])
         latest_date = non_total["Date"].max()
@@ -41,11 +56,12 @@ def load_portfolio() -> tuple[pd.DataFrame, float]:
     total_rows = df[df["Ticker"] == "TOTAL"].copy()
     if total_rows.empty:
         cash = 0.0
-    else:
-        total_rows["Date"] = pd.to_datetime(total_rows["Date"])
-        cash = float(total_rows.sort_values("Date").iloc[-1]["Cash Balance"])
+        return portfolio, cash, True
 
-    return portfolio, cash
+    total_rows["Date"] = pd.to_datetime(total_rows["Date"])
+    cash = float(total_rows.sort_values("Date").iloc[-1]["Cash Balance"])
+
+    return portfolio, cash, False
 
 def save_portfolio_snapshot(portfolio: pd.DataFrame, cash: float) -> pd.DataFrame:
     """Recalculate today's portfolio values and store them in ``PORTFOLIO_CSV``."""
@@ -232,52 +248,82 @@ def manual_sell(
 st.title("ChatGPT Portfolio Manager")
 
 if "portfolio" not in st.session_state:
-    st.session_state.portfolio, st.session_state.cash = load_portfolio()
+    port, cash, needs_cash = load_portfolio()
+    st.session_state.portfolio = port
+    st.session_state.cash = cash
+    st.session_state.needs_cash = needs_cash
 
-# Always refresh today's snapshot and totals
-summary_df = save_portfolio_snapshot(st.session_state.portfolio, st.session_state.cash)
-
-st.subheader("Current Portfolio")
-st.dataframe(st.session_state.portfolio)
-st.metric("Cash Balance", f"${st.session_state.cash:.2f}")
-
-st.subheader("Log a Buy")
-with st.form("buy_form"):
-    b_ticker = st.text_input("Ticker")
-    b_shares = st.number_input("Shares", min_value=0.0, step=1.0)
-    b_price = st.number_input("Price", min_value=0.0, format="%.2f")
-    b_stop = st.number_input("Stop-loss", min_value=0.0, format="%.2f")
-    b_submit = st.form_submit_button("Submit Buy")
-if b_submit:
-    ok, msg, port, cash = manual_buy(b_ticker, b_shares, b_price, b_stop, st.session_state.portfolio, st.session_state.cash)
-    if ok:
-        st.session_state.portfolio = port
-        st.session_state.cash = cash
-        st.success(msg)
+if st.session_state.get("needs_cash", False):
+    # Prompt for starting cash on first-time use
+    st.subheader("Initialize Portfolio")
+    with st.form("init_cash_form"):
+        start_cash = st.number_input("Enter starting cash", min_value=0.0, format="%.2f")
+        init_submit = st.form_submit_button("Set Starting Cash")
+    if init_submit:
+        st.session_state.cash = start_cash
+        st.session_state.needs_cash = False
+        # Persist the cash value to CSV
+        save_portfolio_snapshot(st.session_state.portfolio, st.session_state.cash)
+        st.success(f"Starting cash of ${start_cash:.2f} recorded.")
         st.experimental_rerun()
-    else:
-        st.error(msg)
+else:
+    # Always refresh today's snapshot and totals once cash is initialized
+    summary_df = save_portfolio_snapshot(st.session_state.portfolio, st.session_state.cash)
 
-st.subheader("Log a Sell")
-with st.form("sell_form"):
-    s_ticker = st.text_input("Ticker", key="sell_ticker")
-    s_shares = st.number_input("Shares", min_value=0.0, step=1.0, key="sell_shares")
-    s_price = st.number_input("Price", min_value=0.0, format="%.2f", key="sell_price")
-    s_submit = st.form_submit_button("Submit Sell")
-if s_submit:
-    ok, msg, port, cash = manual_sell(s_ticker, s_shares, s_price, st.session_state.portfolio, st.session_state.cash)
-    if ok:
-        st.session_state.portfolio = port
-        st.session_state.cash = cash
-        st.success(msg)
-        st.experimental_rerun()
+    st.subheader("Current Portfolio")
+    if st.session_state.portfolio.empty:
+        st.info("Your portfolio is empty. Add your first trade below.")
     else:
-        st.error(msg)
+        st.dataframe(st.session_state.portfolio)
+    st.metric("Cash Balance", f"${st.session_state.cash:.2f}")
 
-st.subheader("Daily Summary")
-st.dataframe(summary_df)
-if not summary_df.empty:
-    totals = summary_df[summary_df["Ticker"] == "TOTAL"].iloc[0]
-    st.write(f"Total Stock Value: ${totals['Total Value']}")
-    st.write(f"PnL: ${totals['PnL']}")
-    st.write(f"Total Equity: ${totals['Total Equity']}")
+    st.subheader("Log a Buy")
+    with st.form("buy_form"):
+        b_ticker = st.text_input("Ticker")
+        b_shares = st.number_input("Shares", min_value=0.0, step=1.0)
+        b_price = st.number_input("Price", min_value=0.0, format="%.2f")
+        b_stop = st.number_input("Stop-loss", min_value=0.0, format="%.2f")
+        b_submit = st.form_submit_button("Submit Buy")
+    if b_submit:
+        ok, msg, port, cash = manual_buy(
+            b_ticker, b_shares, b_price, b_stop, st.session_state.portfolio, st.session_state.cash
+        )
+        if ok:
+            st.session_state.portfolio = port
+            st.session_state.cash = cash
+            st.success(msg)
+            st.experimental_rerun()
+        else:
+            st.error(msg)
+
+    st.subheader("Log a Sell")
+    with st.form("sell_form"):
+        s_ticker = st.text_input("Ticker", key="sell_ticker")
+        s_shares = st.number_input("Shares", min_value=0.0, step=1.0, key="sell_shares")
+        s_price = st.number_input("Price", min_value=0.0, format="%.2f", key="sell_price")
+        s_submit = st.form_submit_button("Submit Sell")
+    if s_submit:
+        ok, msg, port, cash = manual_sell(
+            s_ticker, s_shares, s_price, st.session_state.portfolio, st.session_state.cash
+        )
+        if ok:
+            st.session_state.portfolio = port
+            st.session_state.cash = cash
+            st.success(msg)
+            st.experimental_rerun()
+        else:
+            st.error(msg)
+
+    st.subheader("Daily Summary")
+    if not summary_df.empty:
+        totals = summary_df[summary_df["Ticker"] == "TOTAL"].iloc[0]
+        summary_md = (
+            "### Today's totals:\n"
+            f"- Total stock value: ${totals['Total Value']}\n"
+            f"- Total PnL: ${totals['PnL']}\n"
+            f"- Cash balance: ${totals['Cash Balance']}\n"
+            f"- Total equity: ${totals['Total Equity']}\n"
+        )
+        st.markdown(summary_md)
+    else:
+        st.info("No summary available.")
