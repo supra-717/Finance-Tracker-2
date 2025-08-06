@@ -80,6 +80,22 @@ def render_dashboard() -> None:
             st.session_state.portfolio, st.session_state.cash
         )
 
+        summary_df = summary_df.rename(
+            columns={
+                "date": "Date",
+                "ticker": "Ticker",
+                "shares": "Shares",
+                "cost_basis": "Cost Basis",
+                "stop_loss": "Stop Loss",
+                "current_price": "Current Price",
+                "total_value": "Total Value",
+                "pnl": "PnL",
+                "action": "Action",
+                "cash_balance": "Cash Balance",
+                "total_equity": "Total Equity",
+            }
+        )
+
         show_cash_section()
 
         port_table = summary_df[summary_df["Ticker"] != "TOTAL"].copy()
