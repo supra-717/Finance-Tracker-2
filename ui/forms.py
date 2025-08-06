@@ -96,36 +96,51 @@ def show_sell_form() -> None:
         else:
             st.session_state.feedback = ("error", msg)
 
-    with st.expander("Log a Sell"):
-        with st.form("sell_form", clear_on_submit=True):
-            holdings = st.session_state.portfolio
-            st.selectbox(
-                "Ticker",
-                options=holdings[COL_TICKER].tolist(),
-                key="s_ticker",
-            )
-            matching = holdings[holdings[COL_TICKER] == st.session_state.s_ticker]
-            if not matching.empty:
-                max_shares = int(matching.iloc[0][COL_SHARES])
-                latest_price = float(matching.iloc[0][COL_PRICE])
-            else:
-                max_shares = 0
-                latest_price = 0.0
-            st.number_input(
-                "Shares to sell",
-                min_value=1,
-                value=1,
-                max_value=max_shares,
-                step=1,
-                key="s_shares",
-            )
-            st.number_input(
-                "Price",
-                min_value=0.0,
-                value=latest_price,
-                step=0.01,
-                format="%.2f",
-                key="s_price",
-            )
-            st.form_submit_button("Submit Sell", on_click=submit_sell)
+    with st.expander("Log a Sell", expanded=True):
+        holdings = st.session_state.portfolio
+        if holdings.empty:
+            st.info("You have no holdings to sell.")
+            return
+
+        st.selectbox(
+            "Ticker",
+            options=holdings[COL_TICKER].tolist(),
+            key="s_ticker",
+        )
+        matching = holdings[holdings[COL_TICKER] == st.session_state.s_ticker]
+        if not matching.empty:
+            max_shares = int(matching.iloc[0][COL_SHARES])
+            latest_price = float(matching.iloc[0][COL_PRICE])
+        else:
+            max_shares = 0
+            latest_price = 0.0
+
+        if max_shares > 0:
+            share_min = 1
+            share_default = 1
+        else:
+            share_min = 0
+            share_default = 0
+
+        if max_shares == 0:
+            st.info("You have no shares to sell for this ticker.")
+        else:
+            with st.form("sell_form", clear_on_submit=True):
+                st.number_input(
+                    "Shares to sell",
+                    min_value=share_min,
+                    value=share_default,
+                    max_value=max_shares,
+                    step=1,
+                    key="s_shares",
+                )
+                st.number_input(
+                    "Price",
+                    min_value=0.0,
+                    value=latest_price,
+                    step=0.01,
+                    format="%.2f",
+                    key="s_price",
+                )
+                st.form_submit_button("Submit Sell", on_click=submit_sell)
 
