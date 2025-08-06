@@ -13,6 +13,7 @@ import json
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 
 from portfolio import PORTFOLIO_COLUMNS, ensure_schema
@@ -44,6 +45,27 @@ def log_error(message: str) -> None:
     st.session_state.setdefault("error_log", []).append(
         f"{datetime.now():%H:%M:%S} - {message}"
     )
+
+
+def clear_inputs_on_focus(labels: list[str]) -> None:
+    """Attach JS to clear inputs matching ``labels`` when focused."""
+
+    script_parts = []
+    for idx, label in enumerate(labels):
+        script_parts.append(
+            f"""
+            const els{idx} = parent.document.querySelectorAll('input[aria-label="{label}"]');
+            els{idx}.forEach((el) => {{
+                el.addEventListener('focus', () => {{
+                    if (el.value !== '') {{
+                        el.value = '';
+                        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    }}
+                }});
+            }});
+            """
+        )
+    components.html(f"<script>{''.join(script_parts)}</script>", height=0)
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -371,6 +393,8 @@ def init_session_state() -> None:
         "lookup_symbol": "",
         # Holds error text for symbol lookup so it can be cleared on success.
         "lookup_error": "",
+        # Feedback messages related to watchlist actions shown in sidebar.
+        "watchlist_feedback": None,
         "watchlist": [],
         # Cache of latest watchlist prices fetched via the refresh button.
         "watchlist_prices": {},
@@ -397,12 +421,22 @@ def show_onboarding() -> None:
     """Display a simple onboarding message for first-time users."""
 
     if not st.session_state.get("dismissed_onboarding"):
+        def dismiss() -> None:
+            st.session_state.dismissed_onboarding = True
+            st.rerun()
+
         st.info(
             "Use the controls below to manage your portfolio. "
             "Data is stored in the local `data/` directory."
         )
-        if st.button("Dismiss", key="dismiss_onboard"):
-            st.session_state.dismissed_onboarding = True
+        st.button("Dismiss", key="dismiss_onboard", on_click=dismiss)
+
+
+def dismiss_summary() -> None:
+    """Hide the daily summary and immediately rerun the app."""
+
+    st.session_state.summary_visible = False
+    st.rerun()
 
 
 def show_watchlist_sidebar() -> None:
@@ -410,19 +444,20 @@ def show_watchlist_sidebar() -> None:
 
     sidebar = st.sidebar
     sidebar.header("Ticker Lookup")
+    feedback_slot = sidebar.empty()
 
     def add_watchlist_and_clear(sym: str, price: float, portfolio_tickers: set[str]) -> None:
         """Callback to add ``sym`` to the watchlist and reset lookup fields."""
 
         if sym in st.session_state.watchlist:
-            st.session_state.feedback = ("info", f"{sym} already in watchlist.")
+            st.session_state.watchlist_feedback = ("info", f"{sym} already in watchlist.")
         elif sym in portfolio_tickers:
-            st.session_state.feedback = ("info", f"{sym} already in portfolio.")
+            st.session_state.watchlist_feedback = ("info", f"{sym} already in portfolio.")
         else:
             st.session_state.watchlist.append(sym)
             st.session_state.watchlist_prices[sym] = price
             save_watchlist(st.session_state.watchlist)
-            st.session_state.feedback = ("success", f"{sym} added to watchlist.")
+            st.session_state.watchlist_feedback = ("success", f"{sym} added to watchlist.")
         # Clear field and any error so the next lookup starts fresh.
         st.session_state.lookup_symbol = ""
         st.session_state.lookup_error = ""
@@ -440,7 +475,7 @@ def show_watchlist_sidebar() -> None:
         for t in removed:
             st.session_state.watchlist_prices.pop(t, None)
         save_watchlist(st.session_state.watchlist)
-        st.session_state.feedback = (
+        st.session_state.watchlist_feedback = (
             "info",
             f"Removed {', '.join(removed)} from watchlist (now in portfolio).",
         )
@@ -509,9 +544,19 @@ def show_watchlist_sidebar() -> None:
                 st.session_state.watchlist.remove(t)
                 st.session_state.watchlist_prices.pop(t, None)
                 save_watchlist(st.session_state.watchlist)
-                st.session_state.feedback = ("info", f"{t} removed from watchlist.")
+                st.session_state.watchlist_feedback = ("info", f"{t} removed from watchlist.")
                 st.rerun()
             item.markdown("</div>", unsafe_allow_html=True)
+
+    feedback = st.session_state.pop("watchlist_feedback", None)
+    if feedback:
+        kind, text = feedback
+        if kind == "success":
+            feedback_slot.success(text)
+        elif kind == "error":
+            feedback_slot.error(text)
+        else:
+            feedback_slot.info(text)
 
 
 def show_buy_form() -> None:
@@ -576,6 +621,8 @@ def show_buy_form() -> None:
             # callback rather than in-line after widget definition.
             st.form_submit_button("Submit Buy", on_click=submit_buy)
 
+    clear_inputs_on_focus(["Ticker", "Shares", "Price", "Stop Loss %"])
+
 
 def show_sell_form() -> None:
     """Render and process the sell form inside an expander."""
@@ -603,11 +650,14 @@ def show_sell_form() -> None:
 
     with st.expander("Log a Sell"):
         with st.form("sell_form", clear_on_submit=True):
-            st.text_input("Ticker", key="s_ticker")
+            tickers = st.session_state.portfolio[COL_TICKER].tolist()
+            st.selectbox("Ticker", tickers, key="s_ticker")
             st.number_input("Shares", min_value=0.0, step=1.0, key="s_shares")
             st.number_input("Price", min_value=0.0, format="%.2f", key="s_price")
             # Trigger callback to perform sell and clear state safely.
             st.form_submit_button("Submit Sell", on_click=submit_sell)
+
+    clear_inputs_on_focus(["Shares", "Price"])
 
 
 def build_daily_summary(summary_df: pd.DataFrame) -> str:
@@ -822,10 +872,11 @@ def main() -> None:
             # Section 2: Current Portfolio Table
             # --------------------------------------------------------------
             port_table = summary_df[summary_df["Ticker"] != "TOTAL"].copy()
-            header_cols = st.columns([5, 2])
+            header_cols = st.columns([8, 1, 1])
             header_cols[0].subheader("Current Portfolio")
             if port_table.empty:
                 header_cols[1].empty()
+                header_cols[2].empty()
                 st.info(
                     "Your portfolio is empty. Use the Buy form below to add your first position."
                 )
@@ -833,6 +884,10 @@ def main() -> None:
                 auto_refresh = header_cols[1].checkbox(
                     "Auto Refresh", key="auto_refresh", help="Refresh every 30 min"
                 )
+                if header_cols[2].button(
+                    "🔄", key="refresh_portfolio", help="Refresh prices"
+                ):
+                    st.rerun()
                 if auto_refresh:
                     try:  # pragma: no cover - optional dependency
                         from streamlit_autorefresh import st_autorefresh
@@ -843,14 +898,9 @@ def main() -> None:
                             "Install streamlit-autorefresh for auto refresh support."
                         )
 
-                update_cols = st.columns([8, 1])
-                update_cols[0].caption(
+                st.caption(
                     f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                 )
-                if update_cols[1].button(
-                    "🔄", key="refresh_portfolio", help="Refresh prices"
-                ):
-                    st.rerun()
 
                 # Ensure numeric types for calculations and handle invalid data.
                 numeric_cols = [
@@ -1026,7 +1076,10 @@ def main() -> None:
                         ),
                     }
                     st.dataframe(
-                        styled, use_container_width=True, column_config=column_config
+                        styled,
+                        use_container_width=True,
+                        column_config=column_config,
+                        hide_index=True,
                     )
 
             show_buy_form()
@@ -1048,8 +1101,9 @@ def main() -> None:
                 and st.session_state.get("daily_summary")
             ):
                 st.code(st.session_state.daily_summary, language="markdown")
-                if st.button("Dismiss Summary", key="dismiss_summary"):
-                    st.session_state.summary_visible = False
+                st.button(
+                    "Dismiss Summary", key="dismiss_summary", on_click=dismiss_summary
+                )
 
             # --------------------------------------------------------------
             # Section 4: Error Log
