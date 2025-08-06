@@ -99,22 +99,24 @@ def render_dashboard() -> None:
         show_cash_section()
 
         port_table = summary_df[summary_df["Ticker"] != "TOTAL"].copy()
-        header_cols = st.columns([8, 1, 1])
-        header_cols[0].subheader("Current Portfolio")
+        header_cols = st.columns([4, 1, 1])
+        with header_cols[0]:
+            st.subheader("Current Portfolio")
+        with header_cols[1]:
+            auto_refresh = st.checkbox(
+                "Auto-refresh every 30 min",
+                key="auto_refresh",
+                label_visibility="visible",
+            )
+        with header_cols[2]:
+            if st.button("🔄", key="refresh_portfolio", help="Refresh portfolio"):
+                st.experimental_rerun()
+
         if port_table.empty:
-            header_cols[1].empty()
-            header_cols[2].empty()
             st.info(
                 "Your portfolio is empty. Use the Buy form below to add your first position."
             )
         else:
-            auto_refresh = header_cols[1].checkbox(
-                "Auto Refresh", key="auto_refresh", help="Refresh every 30 min"
-            )
-            if header_cols[2].button(
-                "\ud83d\udd04", key="refresh_portfolio", help="Refresh prices"
-            ):
-                st.rerun()
             if auto_refresh:
                 try:  # pragma: no cover - optional dependency
                     from streamlit_autorefresh import st_autorefresh
@@ -152,6 +154,18 @@ def render_dashboard() -> None:
                 inplace=True,
             )
 
+            for col in [
+                "Shares",
+                "Buy Price",
+                "Current Price",
+                "Stop Loss",
+                "Value",
+                "PnL",
+                "Pct Change",
+            ]:
+                if col in port_table:
+                    port_table[col] = pd.to_numeric(port_table[col], errors="coerce")
+
             def highlight_stop(row: pd.Series) -> list[str]:
                 stop = row.get("Stop Loss")
                 price = row.get("Current Price")
@@ -172,39 +186,63 @@ def render_dashboard() -> None:
                 color = "green" if val > 0 else "red" if val < 0 else ""
                 return f"color: {color}"
 
-            numeric_display = [
-                "Shares",
-                "Buy Price",
-                "Current Price",
-                "Stop Loss",
-                "Value",
-                "PnL",
-                "Pct Change",
-            ]
-            styled = (
-                port_table.style.format("{:.2f}")
-                .set_properties(subset=numeric_display, **{"text-align": "right"})
-                .applymap(highlight_pct, subset=["Pct Change"])
-                .applymap(color_pnl, subset=["PnL"])
-                .apply(highlight_stop, axis=1)
-                .set_table_styles(
-                    [
-                        {
-                            "selector": "th",
-                            "props": [
-                                ("font-size", "16px"),
-                                ("text-align", "center"),
-                            ],
-                        },
-                        {
-                            "selector": "td",
-                            "props": [
-                                ("font-size", "16px"),
-                                ("color", "black"),
-                            ],
-                        },
-                    ]
-                )
+            def fmt_currency(x):
+                try:
+                    v = float(x)
+                    return f"${v:,.2f}"
+                except Exception:
+                    return ""
+
+            def fmt_percent(x):
+                try:
+                    v = float(x)
+                    sign = "+" if v > 0 else ""
+                    arrow = "\u2191" if v > 0 else ("\u2193" if v < 0 else "")
+                    return f"{sign}{v:.1f}% {arrow}".strip()
+                except Exception:
+                    return ""
+
+            def fmt_shares(x):
+                try:
+                    return f"{int(float(x)):,}"
+                except Exception:
+                    return ""
+
+            formatters = {}
+            if "Shares" in port_table:
+                formatters["Shares"] = fmt_shares
+            for c in ["Buy Price", "Current Price", "Stop Loss", "Value", "PnL"]:
+                if c in port_table:
+                    formatters[c] = fmt_currency
+            if "Pct Change" in port_table:
+                formatters["Pct Change"] = fmt_percent
+
+            numeric_display = list(formatters.keys())
+
+            styled = port_table.style.format(formatters).set_properties(
+                subset=numeric_display, **{"text-align": "right"}
+            )
+            if "Pct Change" in port_table:
+                styled = styled.applymap(highlight_pct, subset=["Pct Change"])
+            if "PnL" in port_table:
+                styled = styled.applymap(color_pnl, subset=["PnL"])
+            styled = styled.apply(highlight_stop, axis=1).set_table_styles(
+                [
+                    {
+                        "selector": "th",
+                        "props": [
+                            ("font-size", "16px"),
+                            ("text-align", "center"),
+                        ],
+                    },
+                    {
+                        "selector": "td",
+                        "props": [
+                            ("font-size", "16px"),
+                            ("color", "black"),
+                        ],
+                    },
+                ]
             )
 
             column_config = {
