@@ -36,6 +36,10 @@ def manual_buy(
     """Execute a manual buy and update portfolio and logs."""
 
     ticker = ticker.upper()
+    if shares <= 0 or price <= 0:
+        msg = "Shares and price must be positive."
+        log_error(msg)
+        return False, msg, portfolio_df, cash
     try:
         day_high, day_low = get_day_high_low(ticker)
     except Exception as exc:  # pragma: no cover - network errors
@@ -102,6 +106,10 @@ def manual_sell(
     """Execute a manual sell and update portfolio and logs."""
 
     ticker = ticker.upper()
+    if shares <= 0 or price <= 0:
+        msg = "Shares and price must be positive."
+        log_error(msg)
+        return False, msg, portfolio_df, cash
     if ticker not in portfolio_df[COL_TICKER].values:
         msg = "Ticker not in portfolio."
         log_error(msg)
