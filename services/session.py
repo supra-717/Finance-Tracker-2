@@ -23,6 +23,7 @@ def init_session_state() -> None:
         "watchlist_prices": {},
         "show_cash_form": False,
         "daily_summary": "",
+        "show_info": True,
     }.items():
         st.session_state.setdefault(key, default)
 
