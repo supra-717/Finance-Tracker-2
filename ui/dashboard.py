@@ -41,13 +41,6 @@ def render_dashboard() -> None:
     show_watchlist_sidebar()
     show_onboarding()
 
-    theme = st.sidebar.radio("Theme", ["Light", "Dark"], key="theme")
-    if theme == "Dark":
-        st.write(
-            "<style>body { background-color: #0e1117; color: white; }</style>",
-            unsafe_allow_html=True,
-        )
-
     feedback = st.session_state.pop("feedback", None)
     if feedback:
         kind, text = feedback
