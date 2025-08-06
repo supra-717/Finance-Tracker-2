@@ -8,11 +8,8 @@ def show_onboarding() -> None:
         st.info(
             "Use the controls below to manage your portfolio. Data is stored in the local `data/` directory."
         )
-        if st.button("Dismiss", key="dismiss_onboard"):
-            st.session_state.show_info = False
-
-
-def dismiss_summary() -> None:
-    """Hide the daily summary."""
-
-    st.session_state.daily_summary = ""
+        st.button(
+            "Dismiss",
+            on_click=lambda: st.session_state.update(show_info=False),
+            key="dismiss_onboard",
+        )
