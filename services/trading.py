@@ -19,7 +19,21 @@ def append_trade_log(log: dict) -> None:
 
     init_db()
     with get_connection() as conn:
-        pd.DataFrame([log]).to_sql("trade_log", conn, if_exists="append", index=False)
+        df = pd.DataFrame([log])
+        df = df.rename(
+            columns={
+                "Date": "date",
+                "Ticker": "ticker",
+                "Shares Bought": "shares_bought",
+                "Buy Price": "buy_price",
+                "Cost Basis": "cost_basis",
+                "PnL": "pnl",
+                "Reason": "reason",
+                "Shares Sold": "shares_sold",
+                "Sell Price": "sell_price",
+            }
+        )
+        df.to_sql("trade_log", conn, if_exists="append", index=False)
 
 
 def manual_buy(
