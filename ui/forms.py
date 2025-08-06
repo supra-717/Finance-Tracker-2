@@ -41,9 +41,10 @@ def show_buy_form() -> None:
             st.number_input(
                 "Shares",
                 min_value=1,
-                step=1,
-                key="b_shares",
+                value=1.0,
+                step=1.0,
                 format="%.0f",
+                key="b_shares",
                 placeholder="0",
             )
             st.number_input(
@@ -103,12 +104,13 @@ def show_sell_form() -> None:
                 options=holdings[COL_TICKER].tolist(),
                 key="s_ticker",
             )
-            max_shares = int(
-                holdings.loc[holdings[COL_TICKER] == st.session_state.s_ticker, COL_SHARES].item()
-            )
-            latest_price = float(
-                holdings.loc[holdings[COL_TICKER] == st.session_state.s_ticker, COL_PRICE].item()
-            )
+            matching = holdings[holdings[COL_TICKER] == st.session_state.s_ticker]
+            if not matching.empty:
+                max_shares = int(matching.iloc[0][COL_SHARES])
+                latest_price = float(matching.iloc[0][COL_PRICE])
+            else:
+                max_shares = 0
+                latest_price = 0.0
             st.number_input(
                 "Shares to sell",
                 min_value=1,
