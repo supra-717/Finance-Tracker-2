@@ -1,8 +1,8 @@
 import pandas as pd
-import yfinance as yf
 
 from config import PORTFOLIO_CSV, TODAY, COL_TICKER, COL_SHARES, COL_STOP, COL_PRICE, COL_COST
 from portfolio import ensure_schema
+from services.market import fetch_prices
 
 
 def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
@@ -58,14 +58,28 @@ def save_portfolio_snapshot(portfolio_df: pd.DataFrame, cash: float) -> pd.DataF
     total_value = 0.0
     total_pnl = 0.0
 
+    tickers = portfolio_df[COL_TICKER].tolist()
+    data = fetch_prices(tickers)
+    prices: dict[str, float] = {t: 0.0 for t in tickers}
+    if not data.empty:
+        if isinstance(data.columns, pd.MultiIndex):
+            close = data["Close"].iloc[-1]
+            for t in tickers:
+                val = close.get(t)
+                if val is not None and not pd.isna(val):
+                    prices[t] = float(val)
+        else:
+            val = data["Close"].iloc[-1]
+            if tickers and not pd.isna(val):
+                prices[tickers[0]] = float(val)
+
     for _, row in portfolio_df.iterrows():
         ticker = row[COL_TICKER]
         shares = float(row[COL_SHARES])
         stop = float(row[COL_STOP])
         buy_price = float(row[COL_PRICE])
 
-        data = yf.download(ticker, period="1d", progress=False)
-        price = float(data["Close"].iloc[-1]) if not data.empty else 0.0
+        price = prices.get(ticker, 0.0)
         value = round(price * shares, 2)
         pnl = round((price - buy_price) * shares, 2)
         total_value += value

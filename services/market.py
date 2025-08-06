@@ -1,3 +1,4 @@
+import pandas as pd
 import yfinance as yf
 import streamlit as st
 
@@ -14,6 +15,20 @@ def fetch_price(ticker: str) -> float | None:
     except Exception:
         log_error(f"Failed to fetch price for {ticker}")
         return None
+
+
+@st.cache_data(ttl=300)
+def fetch_prices(tickers: list[str]) -> pd.DataFrame:
+    """Return daily data for ``tickers`` in a single request."""
+
+    if not tickers:
+        return pd.DataFrame()
+
+    try:  # pragma: no cover - network errors
+        return yf.download(tickers, period="1d", progress=False)
+    except Exception:
+        log_error(f"Failed to fetch prices for {', '.join(tickers)}")
+        return pd.DataFrame()
 
 
 def get_day_high_low(ticker: str) -> tuple[float, float]:
