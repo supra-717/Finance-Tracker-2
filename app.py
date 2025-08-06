@@ -8,7 +8,9 @@ from ui.user_guide import render_user_guide
 
 st.set_page_config(
     page_title="AI Assisted Trading",
-    theme=_config.get_option("theme.base"),
+    page_icon="🚀",           # optional, if you want an icon
+    layout="wide",           # optional, choose your layout
+    initial_sidebar_state="expanded"  # optional
 )
 
 
