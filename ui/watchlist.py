@@ -1,9 +1,10 @@
+import pandas as pd
 import streamlit as st
 import yfinance as yf
 
 from config import COL_TICKER
 from data.watchlist import save_watchlist
-from services.market import fetch_price
+from services.market import fetch_price, fetch_prices
 
 
 def show_watchlist_sidebar() -> None:
@@ -70,9 +71,19 @@ def show_watchlist_sidebar() -> None:
         hcol1, hcol2 = header.columns([4, 1])
         hcol1.subheader("Watchlist")
         if hcol2.button("\ud83d\udd04", key="refresh_watchlist", help="Refresh prices"):
-            updated: dict[str, float | None] = {}
-            for t in st.session_state.watchlist:
-                updated[t] = fetch_price(t)
+            data = fetch_prices(st.session_state.watchlist)
+            updated: dict[str, float | None] = {t: None for t in st.session_state.watchlist}
+            if not data.empty:
+                if isinstance(data.columns, pd.MultiIndex):
+                    close = data["Close"].iloc[-1]
+                    for t in st.session_state.watchlist:
+                        val = close.get(t)
+                        if val is not None and not pd.isna(val):
+                            updated[t] = float(val)
+                else:
+                    val = data["Close"].iloc[-1]
+                    if st.session_state.watchlist and not pd.isna(val):
+                        updated[st.session_state.watchlist[0]] = float(val)
             st.session_state.watchlist_prices.update(updated)
 
         sidebar.markdown(
