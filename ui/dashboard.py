@@ -6,7 +6,7 @@ from config import TRADE_LOG_CSV
 from data.portfolio import save_portfolio_snapshot
 from services.session import init_session_state
 from ui.watchlist import show_watchlist_sidebar
-from ui.onboarding import show_onboarding, dismiss_summary
+from ui.onboarding import show_onboarding
 from ui.cash import show_cash_section
 from ui.forms import show_buy_form, show_sell_form
 from ui.summary import build_daily_summary
@@ -223,7 +223,11 @@ def render_dashboard() -> None:
                 st.info("No summary available.")
         if st.session_state.get("daily_summary"):
             st.code(st.session_state.daily_summary, language="markdown")
-            st.button("Dismiss Summary", key="dismiss_summary", on_click=dismiss_summary)
+            st.button(
+                "Dismiss Summary",
+                key="dismiss_summary",
+                on_click=lambda: st.session_state.update(daily_summary=""),
+            )
 
         if st.session_state.get("error_log"):
             st.subheader("Error Log")
