@@ -1,7 +1,6 @@
 import streamlit as st
 
-from config import COL_TICKER
-from services.market import fetch_price
+from config import COL_TICKER, COL_SHARES, COL_PRICE
 from services.trading import manual_buy, manual_sell
 
 
@@ -29,23 +28,38 @@ def show_buy_form() -> None:
             st.session_state.portfolio = port
             st.session_state.cash = cash
             st.session_state.feedback = ("success", msg)
-            st.session_state.b_ticker = ""
-            st.session_state.b_shares = 1.0
-            st.session_state.b_price = 1.0
-            st.session_state.b_stop_pct = 0.0
+            st.session_state.pop("b_ticker", None)
+            st.session_state.pop("b_shares", None)
+            st.session_state.pop("b_price", None)
+            st.session_state.pop("b_stop_pct", None)
         else:
             st.session_state.feedback = ("error", msg)
 
     with st.expander("Log a Buy"):
         with st.form("buy_form", clear_on_submit=True):
-            ticker = st.text_input("Ticker", key="b_ticker")
-            st.number_input("Shares", min_value=1, step=1, key="b_shares")
-            latest = fetch_price(ticker) if ticker else 0.0
+            st.text_input("Ticker", key="b_ticker", placeholder="e.g. AAPL")
             st.number_input(
-                "Price", min_value=1.0, step=0.01, format="%.2f", key="b_price", value=latest or 1.0
+                "Shares",
+                min_value=1,
+                step=1,
+                key="b_shares",
+                format="%.0f",
+                placeholder="0",
             )
             st.number_input(
-                "Stop Loss %", min_value=0.0, format="%.1f", key="b_stop_pct"
+                "Price",
+                min_value=0.0,
+                format="%.2f",
+                key="b_price",
+                placeholder="0.00",
+            )
+            st.number_input(
+                "Stop-loss %",
+                min_value=0.0,
+                max_value=100.0,
+                format="%.1f",
+                key="b_stop_pct",
+                placeholder="10",
             )
             if st.session_state.b_price > 0 and st.session_state.b_stop_pct > 0:
                 calc_stop = st.session_state.b_price * (
@@ -75,17 +89,39 @@ def show_sell_form() -> None:
             st.session_state.portfolio = port
             st.session_state.cash = cash
             st.session_state.feedback = ("success", msg)
-            st.session_state.s_ticker = ""
-            st.session_state.s_shares = 1.0
-            st.session_state.s_price = 1.0
+            st.session_state.pop("s_ticker", None)
+            st.session_state.pop("s_shares", None)
+            st.session_state.pop("s_price", None)
         else:
             st.session_state.feedback = ("error", msg)
 
     with st.expander("Log a Sell"):
         with st.form("sell_form", clear_on_submit=True):
-            tickers = st.session_state.portfolio[COL_TICKER].tolist()
-            st.selectbox("Ticker", tickers, key="s_ticker")
-            st.number_input("Shares", min_value=1, step=1, key="s_shares")
-            st.number_input("Price", min_value=1.0, step=0.01, format="%.2f", key="s_price")
+            holdings = st.session_state.portfolio
+            st.selectbox(
+                "Ticker",
+                options=holdings[COL_TICKER].tolist(),
+                key="s_ticker",
+            )
+            max_shares = int(
+                holdings.loc[holdings[COL_TICKER] == st.session_state.s_ticker, COL_SHARES].item()
+            )
+            latest_price = float(
+                holdings.loc[holdings[COL_TICKER] == st.session_state.s_ticker, COL_PRICE].item()
+            )
+            st.number_input(
+                "Shares to sell",
+                min_value=1,
+                max_value=max_shares,
+                step=1,
+                key="s_shares",
+            )
+            st.number_input(
+                "Price",
+                min_value=0.0,
+                format="%.2f",
+                value=latest_price,
+                key="s_price",
+            )
             st.form_submit_button("Submit Sell", on_click=submit_sell)
 
