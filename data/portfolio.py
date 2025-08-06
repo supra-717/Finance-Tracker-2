@@ -91,6 +91,40 @@ def save_portfolio_snapshot(portfolio_df: pd.DataFrame, cash: float) -> pd.DataF
 
     df = pd.DataFrame(results)
 
+    # Rename columns to match the portfolio_history table schema
+    df = df.rename(
+        columns={
+            "Date": "date",
+            "Ticker": "ticker",
+            "Shares": "shares",
+            "Cost Basis": "cost_basis",
+            "Stop Loss": "stop_loss",
+            "Current Price": "current_price",
+            "Total Value": "total_value",
+            "PnL": "pnl",
+            "Action": "action",
+            "Cash Balance": "cash_balance",
+            "Total Equity": "total_equity",
+        }
+    )
+
+    # Ensure column order aligns with the database schema
+    df = df[
+        [
+            "date",
+            "ticker",
+            "shares",
+            "cost_basis",
+            "stop_loss",
+            "current_price",
+            "total_value",
+            "pnl",
+            "action",
+            "cash_balance",
+            "total_equity",
+        ]
+    ]
+
     init_db()
     with get_connection() as conn:
         # Update current holdings
