@@ -41,26 +41,26 @@ def show_buy_form() -> None:
             st.number_input(
                 "Shares",
                 min_value=1,
-                value=1.0,
-                step=1.0,
-                format="%.0f",
+                value=1,
+                step=1,
                 key="b_shares",
-                placeholder="0",
             )
             st.number_input(
                 "Price",
                 min_value=0.0,
+                value=0.0,
+                step=0.01,
                 format="%.2f",
                 key="b_price",
-                placeholder="0.00",
             )
             st.number_input(
                 "Stop-loss %",
                 min_value=0.0,
+                value=0.0,
                 max_value=100.0,
+                step=0.1,
                 format="%.1f",
                 key="b_stop_pct",
-                placeholder="10",
             )
             if st.session_state.b_price > 0 and st.session_state.b_stop_pct > 0:
                 calc_stop = st.session_state.b_price * (
@@ -114,6 +114,7 @@ def show_sell_form() -> None:
             st.number_input(
                 "Shares to sell",
                 min_value=1,
+                value=1,
                 max_value=max_shares,
                 step=1,
                 key="s_shares",
@@ -121,8 +122,9 @@ def show_sell_form() -> None:
             st.number_input(
                 "Price",
                 min_value=0.0,
-                format="%.2f",
                 value=latest_price,
+                step=0.01,
+                format="%.2f",
                 key="s_price",
             )
             st.form_submit_button("Submit Sell", on_click=submit_sell)
