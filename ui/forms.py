@@ -30,8 +30,8 @@ def show_buy_form() -> None:
             st.session_state.cash = cash
             st.session_state.feedback = ("success", msg)
             st.session_state.b_ticker = ""
-            st.session_state.b_shares = 0.0
-            st.session_state.b_price = 0.0
+            st.session_state.b_shares = 1.0
+            st.session_state.b_price = 1.0
             st.session_state.b_stop_pct = 0.0
         else:
             st.session_state.feedback = ("error", msg)
@@ -76,8 +76,8 @@ def show_sell_form() -> None:
             st.session_state.cash = cash
             st.session_state.feedback = ("success", msg)
             st.session_state.s_ticker = ""
-            st.session_state.s_shares = 0.0
-            st.session_state.s_price = 0.0
+            st.session_state.s_shares = 1.0
+            st.session_state.s_price = 1.0
         else:
             st.session_state.feedback = ("error", msg)
 

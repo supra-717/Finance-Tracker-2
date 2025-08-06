@@ -10,12 +10,12 @@ def init_session_state() -> None:
 
     for key, default in {
         "b_ticker": "",
-        "b_shares": 0.0,
-        "b_price": 0.0,
+        "b_shares": 1.0,
+        "b_price": 1.0,
         "b_stop_pct": 0.0,
         "s_ticker": "",
-        "s_shares": 0.0,
-        "s_price": 0.0,
+        "s_shares": 1.0,
+        "s_price": 1.0,
         "ac_amount": 0.0,
         "lookup_symbol": "",
         "watchlist_feedback": None,
