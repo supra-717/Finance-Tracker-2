@@ -3,7 +3,6 @@ import streamlit as st
 from config import COL_TICKER
 from services.market import fetch_price
 from services.trading import manual_buy, manual_sell
-from ui.utils import clear_inputs_on_focus
 
 
 def show_buy_form() -> None:
@@ -49,9 +48,6 @@ def show_buy_form() -> None:
                 st.caption(f"Stop loss price: ${calc_stop:.2f}")
             st.form_submit_button("Submit Buy", on_click=submit_buy)
 
-    clear_inputs_on_focus(["Ticker", "Shares", "Price", "Stop Loss %"])
-
-
 def show_sell_form() -> None:
     """Render and process the sell form inside an expander."""
 
@@ -81,4 +77,3 @@ def show_sell_form() -> None:
             st.number_input("Price", min_value=0.0, format="%.2f", key="s_price")
             st.form_submit_button("Submit Sell", on_click=submit_sell)
 
-    clear_inputs_on_focus(["Shares", "Price"])
