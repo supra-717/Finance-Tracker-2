@@ -1,8 +1,9 @@
 import pandas as pd
 
-from config import PORTFOLIO_CSV, TODAY, COL_TICKER, COL_SHARES, COL_STOP, COL_PRICE, COL_COST
+from config import TODAY, COL_TICKER, COL_SHARES, COL_STOP, COL_PRICE, COL_COST
 from portfolio import ensure_schema
 from services.market import fetch_prices
+from data.db import init_db, get_connection
 
 
 def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
@@ -10,45 +11,17 @@ def load_portfolio() -> tuple[pd.DataFrame, float, bool]:
 
     empty_portfolio = pd.DataFrame(columns=ensure_schema(pd.DataFrame()).columns)
 
-    if not PORTFOLIO_CSV.exists():
+    init_db()
+    with get_connection() as conn:
+        portfolio_df = pd.read_sql_query("SELECT * FROM portfolio", conn)
+        cash_row = conn.execute("SELECT balance FROM cash WHERE id = 0").fetchone()
+
+    if portfolio_df.empty and cash_row is None:
         return empty_portfolio, 0.0, True
 
-    try:
-        df = pd.read_csv(PORTFOLIO_CSV)
-    except pd.errors.EmptyDataError:
-        return empty_portfolio, 0.0, True
-
-    if df.empty:
-        return empty_portfolio, 0.0, True
-
-    non_total = df[df["Ticker"] != "TOTAL"].copy()
-    if non_total.empty:
-        portfolio = empty_portfolio.copy()
-    else:
-        non_total["Date"] = pd.to_datetime(non_total["Date"])
-        latest_date = non_total["Date"].max()
-        latest = non_total[non_total["Date"] == latest_date].copy()
-        latest.rename(
-            columns={
-                "Ticker": COL_TICKER,
-                "Shares": COL_SHARES,
-                "Stop Loss": COL_STOP,
-                "Cost Basis": COL_PRICE,
-            },
-            inplace=True,
-        )
-        latest[COL_COST] = latest[COL_SHARES] * latest[COL_PRICE]
-        portfolio = ensure_schema(latest).reset_index(drop=True)
-
-    total_rows = df[df["Ticker"] == "TOTAL"].copy()
-    if total_rows.empty:
-        cash = 0.0
-        return portfolio, cash, True
-
-    total_rows["Date"] = pd.to_datetime(total_rows["Date"])
-    cash = float(total_rows.sort_values("Date").iloc[-1]["Cash Balance"])
-
-    return portfolio, cash, False
+    portfolio = ensure_schema(portfolio_df) if not portfolio_df.empty else empty_portfolio
+    cash = float(cash_row[0]) if cash_row else 0.0
+    return portfolio, cash, portfolio_df.empty
 
 
 def save_portfolio_snapshot(portfolio_df: pd.DataFrame, cash: float) -> pd.DataFrame:
@@ -117,9 +90,18 @@ def save_portfolio_snapshot(portfolio_df: pd.DataFrame, cash: float) -> pd.DataF
     results.append(total_row)
 
     df = pd.DataFrame(results)
-    if PORTFOLIO_CSV.exists():
-        existing = pd.read_csv(PORTFOLIO_CSV)
-        existing = existing[existing["Date"] != TODAY]
-        df = pd.concat([existing, df], ignore_index=True)
-    df.to_csv(PORTFOLIO_CSV, index=False)
+
+    init_db()
+    with get_connection() as conn:
+        # Update current holdings
+        conn.execute("DELETE FROM portfolio")
+        portfolio_df.to_sql("portfolio", conn, if_exists="append", index=False)
+
+        # Update cash balance (single row table)
+        conn.execute("INSERT OR REPLACE INTO cash (id, balance) VALUES (0, ?)", (cash,))
+
+        # Store daily snapshot
+        conn.execute("DELETE FROM portfolio_history WHERE date = ?", (TODAY,))
+        df.to_sql("portfolio_history", conn, if_exists="append", index=False)
+
     return df

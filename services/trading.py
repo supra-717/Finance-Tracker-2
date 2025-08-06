@@ -2,7 +2,6 @@ import pandas as pd
 
 from config import (
     TODAY,
-    TRADE_LOG_CSV,
     COL_TICKER,
     COL_SHARES,
     COL_STOP,
@@ -12,17 +11,15 @@ from config import (
 from data.portfolio import save_portfolio_snapshot
 from services.market import get_day_high_low
 from services.logging import log_error
+from data.db import init_db, get_connection
 
 
 def append_trade_log(log: dict) -> None:
-    """Append a dictionary entry to the trade log CSV."""
+    """Persist a dictionary entry to the trade log table."""
 
-    if TRADE_LOG_CSV.exists():
-        existing = pd.read_csv(TRADE_LOG_CSV)
-        log_df = pd.concat([existing, pd.DataFrame([log])], ignore_index=True)
-    else:
-        log_df = pd.DataFrame([log])
-    log_df.to_csv(TRADE_LOG_CSV, index=False)
+    init_db()
+    with get_connection() as conn:
+        pd.DataFrame([log]).to_sql("trade_log", conn, if_exists="append", index=False)
 
 
 def manual_buy(
