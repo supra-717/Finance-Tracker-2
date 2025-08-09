@@ -32,7 +32,7 @@ you can buy sell anything as long as you have the capital avaible (right now you
 ## All deep research prompts going for forward: 
 "You are a professional grade portfolio analyst. Use deep research to reevalute your portfolio. 
 You can check current holdings and/or find new stocks. Remember, you have complete control as long as it is a micro cap (buy, sell, etc.). 
-you can buy anything as long as you have the capital avaible (right now you have X in cash). Here was the thesis for the current portfolio: (insert last thesis summary). 
+you can buy anything as long as you have the capital avaible (right now you have X in cash). For any changes, be very clear about buying and selling orders. Have complete all complete info (date, stoploss, etc.) listed. Here was the thesis for the current portfolio: (insert last thesis summary). 
 Remember your only goal is alpha. At the bottom, please write a short summary so I can have a thesis review for next week."
 
 ## All prompts for changing chats going forward: 
