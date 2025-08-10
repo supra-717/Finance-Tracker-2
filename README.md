@@ -1,51 +1,50 @@
-# Système de Prédiction de Paris Sportifs Football
+# Système de Prédiction Automatisé pour le Football
 
-Ce projet est une **application web** conçue pour prédire les résultats de matchs de football et afficher les cotes, le tout accessible depuis un navigateur, y compris sur smartphone.
+Ce projet est un **système automatisé** qui utilise GitHub Actions pour générer quotidiennement des prédictions de matchs de football. Il n'y a pas d'interface web ; tout est géré par des workflows automatisés directement dans GitHub.
 
 ## 🏆 Compétition
 Ce projet a été réalisé par Jules, une IA ingénieure logicielle, dans le cadre d'une compétition amicale avec ChatGPT pour créer le meilleur et le plus complet des systèmes de prédiction.
 
 ## ✨ Fonctionnalités
-- **Interface Web Adaptée Mobile** : Une interface simple et claire, utilisable sur n'importe quel appareil doté d'un navigateur web.
+- **Automatisation Complète** : Le système s'exécute automatiquement chaque jour pour récupérer les prédictions des matchs à venir.
+- **Déclenchement Manuel** : En plus de l'automatisation, vous pouvez lancer le processus de prédiction à tout moment d'un simple clic.
 - **Modèle de Prédiction v1.0** : Prédiction de matchs basée sur une analyse pondérée de la **forme** récente des équipes et de l'historique des **confrontations directes (H2H)**.
-- **Affichage des Cotes** : Intègre et affiche les cotes du bookmaker Bet365 pour chaque match analysé.
-- **Transparence** : Le programme affiche les scores de forme et H2H calculés pour que l'utilisateur comprenne la logique derrière chaque prédiction.
-- **Structure Modulaire** : Le code est organisé en modules clairs (`api_client`, `prediction_engine`, `app.py`), ce qui le rend facile à maintenir et à améliorer.
+- **Intégration des Cotes** : Récupère et affiche les cotes du bookmaker Bet365 pour chaque match.
+- **Utilisation Sécurisée de l'API** : La clé API est stockée de manière sécurisée grâce aux Secrets de GitHub.
 
-## 🚀 Instructions d'Installation et d'Utilisation
+## 🚀 Workflow d'Utilisation
 
-Suivez ces 3 étapes simples pour lancer l'application.
+Le fonctionnement est maintenant basé sur les "Actions" de GitHub. Voici comment l'utiliser.
 
-### 1. Configurez votre Clé API
+### Étape 1 : Configuration de la Clé API (Une seule fois)
 
-L'accès à l'API `api-football` nécessite une clé personnelle.
+C'est l'étape la plus importante. Pour que le système puisse fonctionner, vous devez fournir votre clé API de manière sécurisée.
 
-1.  Ouvrez le fichier `config.py`.
-2.  À l'intérieur, trouvez la ligne `API_KEY = "VOTRE_CLE_API"`.
-3.  Remplacez `"VOTRE_CLE_API"` par votre clé personnelle que vous pouvez obtenir sur [RapidAPI](https://rapidapi.com/api-sports/api/api-football).
+1.  Dans votre dépôt GitHub, allez dans l'onglet **Settings** (Paramètres).
+2.  Dans le menu de gauche, naviguez jusqu'à **Secrets and variables** > **Actions**.
+3.  Cliquez sur le bouton **New repository secret**.
+4.  Pour le **Name** (Nom), entrez exactement `API_FOOTBALL_KEY`. C'est très important que le nom soit identique.
+5.  Pour le **Secret**, collez votre clé API personnelle que vous avez obtenue sur RapidAPI.
+6.  Cliquez sur **Add secret**.
 
-### 2. Installez les Dépendances
+Votre clé est maintenant stockée de manière sécurisée.
 
-Ce projet utilise des librairies Python externes. Pour les installer, ouvrez un terminal dans le répertoire du projet et exécutez la commande suivante :
-```bash
-pip install -r requirements.txt
-```
-(Cela installera `requests` et `Flask`).
+### Étape 2 : Lancer les Prédictions
 
-### 3. Lancez l'Application Web
+Vous avez deux options :
 
-Une fois la configuration et l'installation terminées, lancez le serveur web.
+**Option A : Attendre l'exécution automatique**
+- Le système est programmé pour s'exécuter **tous les jours à 8h00 UTC**. Vous n'avez rien à faire, les prédictions seront générées automatiquement.
 
-1.  Ouvrez un terminal dans le répertoire du projet.
-2.  Exécutez la commande suivante :
-    ```bash
-    python app.py
-    ```
-3.  Le terminal affichera une adresse, probablement `http://127.0.0.1:5001`. Ouvrez cette adresse dans votre navigateur web pour utiliser l'application.
-    *(Pour un usage sur smartphone, si votre téléphone est sur le même réseau WiFi que l'ordinateur qui lance le serveur, vous pourrez accéder à l'application en utilisant l'adresse IP locale de l'ordinateur, par exemple `http://192.168.1.XX:5001`)*
+**Option B : Lancer manuellement**
+1.  Allez dans l'onglet **Actions** de votre dépôt GitHub.
+2.  Dans le menu de gauche, cliquez sur le workflow nommé **"Daily Football Predictions"**.
+3.  Vous verrez un message "This workflow has a workflow_dispatch event". Cliquez sur le bouton **Run workflow** à droite.
+4.  Laissez les options par défaut et cliquez sur le bouton vert **Run workflow**.
 
-## 💡 Améliorations Futures Possibles
-Ce projet est une base solide. Voici quelques pistes pour le rendre encore meilleur :
-- **Intégrer plus de données** : Classements, statistiques détaillées des joueurs, informations sur les blessés et suspendus.
-- **Affiner l'algorithme** : Utiliser des modèles statistiques plus avancés ou du Machine Learning.
-- **Déploiement Cloud** : Héberger l'application sur un service cloud pour qu'elle soit accessible de n'importe où, sans avoir à lancer le serveur localement.
+### Étape 3 : Voir les Résultats
+
+1.  Toujours dans l'onglet **Actions**, vous verrez une nouvelle ligne apparaître pour l'exécution que vous venez de lancer (ou pour l'exécution quotidienne).
+2.  Cliquez sur le titre de cette exécution.
+3.  Sur la page suivante, cliquez sur la tâche nommée **"build"**.
+4.  Les logs (le compte-rendu) de l'exécution s'afficheront. Déroulez la section **"Run prediction script"** pour voir la liste de toutes les prédictions générées.
