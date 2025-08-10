@@ -1,88 +1,51 @@
-# ChatGPT Micro-Cap Experiment
-Welcome to the repo behind my 6-month live trading experiment where ChatGPT manages a real-money micro-cap portfolio.
+# Système de Prédiction de Paris Sportifs Football
 
-# The Concept
-Everyday, I kept seeing the same ad about having an some A.I. pick undervalued stocks. It was obvious it was trying to get me to subscribe to some garbage, so I just rolled my eyes. 
-Then I started wondering, "How well would that actually work?".
+Ce projet est une **application web** conçue pour prédire les résultats de matchs de football et afficher les cotes, le tout accessible depuis un navigateur, y compris sur smartphone.
 
-So, starting with just $100, I wanted to answer a simple but powerful question:
+## 🏆 Compétition
+Ce projet a été réalisé par Jules, une IA ingénieure logicielle, dans le cadre d'une compétition amicale avec ChatGPT pour créer le meilleur et le plus complet des systèmes de prédiction.
 
-**Can powerful large language models like ChatGPT actually generate alpha (or at least make smart trading decisions) using real-time data?**
+## ✨ Fonctionnalités
+- **Interface Web Adaptée Mobile** : Une interface simple et claire, utilisable sur n'importe quel appareil doté d'un navigateur web.
+- **Modèle de Prédiction v1.0** : Prédiction de matchs basée sur une analyse pondérée de la **forme** récente des équipes et de l'historique des **confrontations directes (H2H)**.
+- **Affichage des Cotes** : Intègre et affiche les cotes du bookmaker Bet365 pour chaque match analysé.
+- **Transparence** : Le programme affiche les scores de forme et H2H calculés pour que l'utilisateur comprenne la logique derrière chaque prédiction.
+- **Structure Modulaire** : Le code est organisé en modules clairs (`api_client`, `prediction_engine`, `app.py`), ce qui le rend facile à maintenir et à améliorer.
 
-## Each trading day:
+## 🚀 Instructions d'Installation et d'Utilisation
 
-- I provide it trading data on the stocks in it's portfolio.
+Suivez ces 3 étapes simples pour lancer l'application.
 
-- Strict stop-loss rules apply.
+### 1. Configurez votre Clé API
 
-- Everyweek I allow it to use deep research to reevaluate it's account.
+L'accès à l'API `api-football` nécessite une clé personnelle.
 
-- I track and publish performance data weekly on my blog. [SubStack Link](https://nathanbsmith729.substack.com)
+1.  Ouvrez le fichier `config.py`.
+2.  À l'intérieur, trouvez la ligne `API_KEY = "VOTRE_CLE_API"`.
+3.  Remplacez `"VOTRE_CLE_API"` par votre clé personnelle que vous pouvez obtenir sur [RapidAPI](https://rapidapi.com/api-sports/api/api-football).
 
-  ## Research & Documentation
+### 2. Installez les Dépendances
 
-- [Research Index](https://github.com/LuckyOne7777/ChatGPT-Micro-Cap-Experiment/blob/main/Experiment%20Details/Deep%20Research%20Index.md)
-
-- [Disclaimer](https://github.com/LuckyOne7777/ChatGPT-Micro-Cap-Experiment/blob/main/Experiment%20Details/Disclaimer.md)
-
-- [Q&A](https://github.com/LuckyOne7777/ChatGPT-Micro-Cap-Experiment/blob/main/Experiment%20Details/Q%26A.md)
-
-- [Prompts](https://github.com/LuckyOne7777/ChatGPT-Micro-Cap-Experiment/blob/main/Experiment%20Details/Prompts.md)
-
-- [Starting Your Own](https://github.com/LuckyOne7777/ChatGPT-Micro-Cap-Experiment/blob/main/Start%20Your%20Own/README.md)
-
--  [Markdown Research Summaries (MD)](https://github.com/LuckyOne7777/ChatGPT-Micro-Cap-Experiment/tree/main/Weekly%20Deep%20Research%20(MD))
-- [Weekly Deep Research Reports (PDF)](https://github.com/LuckyOne7777/ChatGPT-Micro-Cap-Experiment/tree/main/Weekly%20Deep%20Research%20(PDF))
-  
-# Performance Example (6/30 – 7/25)
-
----
-
-![Week 4 Performance](%286-30%20-%207-25%29%20Results.png)
-
----
-- Currently stomping on the Russell 2K.
-
-# Features of This Repo
-Live trading scripts — Used to evaluate prices and update holdings daily
-
-LLM-powered decision engine — ChatGPT picks the trades
-
-Performance tracking — CSVs with daily PnL, total equity, and trade history
-
-Visualization tools — Matplotlib graphs comparing ChatGPT vs Index
-
-Logs & trade data — Auto-saved logs for transparency
-
-# Why This Matters
-AI is being hyped across every industry, but can it really manage money without guidance?
-
-This project is an attempt to find out, with transparency, data, and a real budget.
-
-# Tech Stack
-Basic Python 
-
-Pandas + yFinance for data & logic
-
-Matplotlib for visualizations
-
-ChatGPT for decision-making
-
-# Installation
-To run the scripts locally, install the Python dependencies:
-
-```
+Ce projet utilise des librairies Python externes. Pour les installer, ouvrez un terminal dans le répertoire du projet et exécutez la commande suivante :
+```bash
 pip install -r requirements.txt
 ```
+(Cela installera `requests` et `Flask`).
 
-# Follow Along
-The experiment runs June 2025 to December 2025.
-Every trading day I will update the portfolio CSV file.
-If you feel inspired to do something simiar, feel free to use this as a blueprint.
+### 3. Lancez l'Application Web
 
-Updates are posted weekly on my blog — more coming soon!
+Une fois la configuration et l'installation terminées, lancez le serveur web.
 
-One final shameless plug: (https://substack.com/@nathanbsmith?utm_source=edit-profile-page)
+1.  Ouvrez un terminal dans le répertoire du projet.
+2.  Exécutez la commande suivante :
+    ```bash
+    python app.py
+    ```
+3.  Le terminal affichera une adresse, probablement `http://127.0.0.1:5001`. Ouvrez cette adresse dans votre navigateur web pour utiliser l'application.
+    *(Pour un usage sur smartphone, si votre téléphone est sur le même réseau WiFi que l'ordinateur qui lance le serveur, vous pourrez accéder à l'application en utilisant l'adresse IP locale de l'ordinateur, par exemple `http://192.168.1.XX:5001`)*
 
-Find a mistake in the logs or have advice?
-Please Reach out here: nathanbsmith.business@gmail.com
+## 💡 Améliorations Futures Possibles
+Ce projet est une base solide. Voici quelques pistes pour le rendre encore meilleur :
+- **Intégrer plus de données** : Classements, statistiques détaillées des joueurs, informations sur les blessés et suspendus.
+- **Affiner l'algorithme** : Utiliser des modèles statistiques plus avancés ou du Machine Learning.
+- **Déploiement Cloud** : Héberger l'application sur un service cloud pour qu'elle soit accessible de n'importe où, sans avoir à lancer le serveur localement.

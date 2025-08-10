@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matchs du Jour</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f4f4f9; color: #333; margin: 0; padding: 2rem; }
+        .container { max-width: 800px; margin: auto; background: #fff; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { color: #5a67d8; text-align: center; }
+        .fixture-list { list-style: none; padding: 0; }
+        .fixture-item { display: flex; justify-content: space-between; align-items: center; padding: 1rem; border-bottom: 1px solid #ddd; }
+        .fixture-item:last-child { border-bottom: none; }
+        .teams { font-weight: bold; }
+        button { background-color: #38a169; color: white; border: none; padding: 0.6rem 1rem; border-radius: 4px; cursor: pointer; transition: background-color 0.3s; }
+        button:hover { background-color: #2f855a; }
+        .no-fixtures { text-align: center; font-size: 1.2rem; color: #718096; }
+        .back-link { display: block; text-align: center; margin-top: 2rem; color: #5a67d8; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Matchs du {{ date }}</h1>
+        {% if fixtures %}
+            <ul class="fixture-list">
+                {% for fixture in fixtures %}
+                    <li class="fixture-item">
+                        <span class="teams">{{ fixture.teams.home.name }} vs {{ fixture.teams.away.name }}</span>
+                        <form action="/result" method="post">
+                            <input type="hidden" name="fixture_data" value="{{ fixture | tojson }}">
+                            <button type="submit">Prédire</button>
+                        </form>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p class="no-fixtures">Aucun match trouvé pour cette date.</p>
+        {% endif %}
+        <a href="/" class="back-link">Retour à l'accueil</a>
+    </div>
+</body>
+</html>
